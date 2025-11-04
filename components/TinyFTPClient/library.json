@@ -1,0 +1,34 @@
+{
+  "name": "TinyFTPClient",
+  "version": "1.2.0",
+  "description": "A tiny Arduino/PlatformIO library for a FTP client running on ESP8266 and ESP32.",
+  "keywords": "FTP, ESP8266, ESP32",
+  "repository":
+  {
+    "type": "git",
+    "url": "https://github.com/exocet22/TinyFTPClient"
+  },
+  "authors":
+  [
+    {
+      "name": "Yvan Régeard",
+      "email": "yvan.regeard@gmail.com",
+      "maintainer": true
+    },
+    {
+      "name": "Justin Leahy",
+      "url": "https://github.com/justinleahy"
+    },
+    {
+      "name":  "Leonardo Bispo",
+      "url":   "https://github.com/ldab"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": "*",
+  "platforms": "*",
+  "export":
+  {
+    "include": ["src", "examples", "LICENSE.txt"]
+  }
+}
