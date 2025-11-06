@@ -190,19 +190,22 @@ static void audio_feed_task(void *arg) {
     }
 
     /* Channel Adjust */
+// BW
     if (g_sr_data->i2s_rx_chan_num == 1) {
       for (int i = audio_chunksize - 1; i >= 0; i--) {
-#ifdef HAS_REFCHANNEL
-        audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
-#endif
+        if (SR_CHANNEL_NUM>2) {
+          audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
+        }
         audio_buffer[i * SR_CHANNEL_NUM + 1] = 0;
         audio_buffer[i * SR_CHANNEL_NUM + 0] = audio_buffer[i];
       }
     } else if (g_sr_data->i2s_rx_chan_num==2 && SR_CHANNEL_NUM==2) {
-      // do nothing
+      // do nothing, format of incoming buffer matches layout expected by AFE
     } else if (g_sr_data->i2s_rx_chan_num == 2) {
       for (int i = audio_chunksize - 1; i >= 0; i--) {
-        audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
+        if (SR_CHANNEL_NUM>2) {
+          audio_buffer[i * SR_CHANNEL_NUM + 2] = 0;
+        }
         audio_buffer[i * SR_CHANNEL_NUM + 1] = audio_buffer[i * 2 + 1];
         audio_buffer[i * SR_CHANNEL_NUM + 0] = audio_buffer[i * 2 + 0];
       }
@@ -217,6 +220,7 @@ static void audio_feed_task(void *arg) {
   }
   vTaskDelete(NULL);
 }
+// end BW
 
 static void audio_detect_task(void *arg) {
   int afe_chunksize = g_sr_data->afe_handle->get_fetch_chunksize(g_sr_data->afe_data);
@@ -334,7 +338,15 @@ esp_err_t srx_set_mode(sr_mode_t mode) {
 }
 
 esp_err_t srx_start(
-  sr_fill_cb fill_cb, void *fill_cb_arg, sr_channels_t rx_chan, sr_mode_t mode, const sr_cmd_t sr_commands[], size_t cmd_number, sr_event_cb cb, void *cb_arg
+  sr_fill_cb fill_cb, 
+  void *fill_cb_arg, 
+  sr_channels_t rx_chan, 
+  sr_mode_t mode, 
+  const char *input_format, 
+  const sr_cmd_t sr_commands[], 
+  size_t cmd_number, 
+  sr_event_cb cb, 
+  void *cb_arg
 ) {
   esp_err_t ret = ESP_OK;
   ESP_RETURN_ON_FALSE(NULL == g_sr_data, ESP_ERR_INVALID_STATE, "SR already running");
@@ -361,13 +373,14 @@ esp_err_t srx_start(
   models = esp_srmodel_init("model");
 
 // BW
+  SR_CHANNEL_NUM = strlen(input_format);  // typ 2 or 3 channels
+//end BW
   // Load WakeWord Detection
-  afe_config_t *afe_config = afe_config_init("MM", models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+  afe_config_t *afe_config = afe_config_init(input_format, models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
   g_sr_data->afe_handle = esp_afe_handle_from_config(afe_config);
   log_d("load wakenet '%s'", afe_config->wakenet_model_name);
   g_sr_data->afe_data = g_sr_data->afe_handle->create_from_config(afe_config);
   afe_config_free(afe_config);
-//end BW
 
   // Load Custom Command Detection
   char *mn_name = esp_srmodel_filter(models, ESP_MN_PREFIX, ESP_MN_ENGLISH);

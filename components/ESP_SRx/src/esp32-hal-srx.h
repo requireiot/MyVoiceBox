@@ -18,7 +18,15 @@ extern "C" {
 #endif
 
 esp_err_t srx_start(
-  sr_fill_cb fill_cb, void *fill_cb_arg, sr_channels_t rx_chan, sr_mode_t mode, const sr_cmd_t *sr_commands, size_t cmd_number, sr_event_cb cb, void *cb_arg
+  sr_fill_cb fill_cb, 
+  void *fill_cb_arg, 
+  sr_channels_t rx_chan, 
+  sr_mode_t mode, 
+  const char *input_format, 
+  const sr_cmd_t *sr_commands, 
+  size_t cmd_number, 
+  sr_event_cb cb, 
+  void *cb_arg
 );
 esp_err_t srx_stop(void);
 esp_err_t srx_pause(void);

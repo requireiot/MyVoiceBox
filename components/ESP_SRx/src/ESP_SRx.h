@@ -24,7 +24,14 @@ public:
   ~ESP_SRx_Class();
 
   void onEvent(srx_cb cb);
-  bool begin(I2SClass &i2s, const sr_cmd_t *sr_commands, size_t sr_commands_len, sr_channels_t rx_chan = SR_CHANNELS_STEREO, sr_mode_t mode = SR_MODE_WAKEWORD);
+  bool begin(
+    I2SClass &i2s, 
+    const sr_cmd_t *sr_commands, 
+    size_t sr_commands_len, 
+    sr_channels_t rx_chan = SR_CHANNELS_STEREO, 
+    sr_mode_t mode = SR_MODE_WAKEWORD, 
+    const char *input_format = "MN"
+  );
   bool end(void);
   bool setMode(sr_mode_t mode);
   bool pause(void);

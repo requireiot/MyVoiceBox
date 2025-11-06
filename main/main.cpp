@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1910 2025-11-04 11:12:38Z  $
+ * This Revision: $Id: main.cpp 1914 2025-11-06 18:20:37Z  $
  */
 
 /*
@@ -23,9 +23,8 @@
  * built with ESP-IDF and Arduino-as-a-component
  */
 
-#define USE_SR              // do speech recognition, not just voice recording
 #define USE_SRX             // use modified ESP_SR library
-//#define USE_SR_COMMANDS
+//#define USE_SR_COMMANDS   // define SR commands in call to ESP_SR.begin(), not later
 
 //----- Arduino and libraries
 #include <Arduino.h>
@@ -41,20 +40,18 @@
 #include "esp_littlefs.h"
 #include <map>
 #include <ESP_I2S.h>
-#ifdef USE_SR
- #ifdef USE_SRX
-  #include <ESP_SRx.h>
-  #define ESP_SR ESP_SRx
- #else
-  #include <ESP_SR.h>
- #endif
+#ifdef USE_SRX
+ #include <ESP_SRx.h>
+ #define ESP_SR ESP_SRx
+#else
+ #include <ESP_SR.h>
 #endif
 #include "sdkconfig.h"
 
 //----- project-specific headers
 #include "ansi.h"
 #include "myauth.h"
-#include "parse_sr_commands.h"
+#include "sr_commands.h"
 #include "uploadWAV.h"
 #include "SimpleMqttClientESP.h"
 #include "SimpleOTA.h"
@@ -65,7 +62,7 @@
 #define DebugSerial Serial0
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1910 2025-11-04 11:12:38Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1914 2025-11-06 18:20:37Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -196,8 +193,57 @@ public:
 
 #pragma endregion
 //==============================================================================
+#pragma region Global variables
+
+#define GREEN_OK ANSI_BRIGHT_GREEN "OK " ANSI_RESET
+
+char msgbuf[256];
+
+StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
+
+SR_Commands srCommands;
+
+I2SClass tx_i2s;
+MyRxI2SClass rx_i2s;
+
+//----- I2S raw data buffers, these depend on the selected word size
+tx_raw_t tx_buf[TX_BUFLEN * TX_NCHANNELS];
+
+// all buffers below are always 16 bit mono, independent of I2S word size
+
+//----- RX buffer for entire recording, in mono 16 bits for a WAV file
+wav_buffer_t voice;
+size_t   voice_samples; // number of valid samples in voice buffer
+
+wav_buffer_t wav;           // waveform received via MQTT
+char* wav_byte_ptr;     // byte-wise pointer into wav.buf during collection
+unsigned wav_sample_rate;   // sample rate of the WAV file being collected
+
+wav_buffer_t beep_hello;
+wav_buffer_t beep_wake;
+wav_buffer_t beep_error;
+
+//----- state indicators, may be set by one task and read by another
+volatile bool hasRecord = false;    ///< voice recording complete, ready to be written to FTP
+volatile bool isRecording = false;  ///< is currently recording voice from mic or SR input
+volatile bool isPlaying = false;    ///< is currently playing a WAV file from memory
+volatile bool isCollecting = false; ///< is currently receiving a WAV file via MQTT
+
+//---- network stuff
+
+WiFiUDP udpClient;
+NTPClient ntpClient(udpClient);
+SimpleMqttClientESP mqttClient( MQTT_BROKER_RHASSPY );
+#ifdef SYSLOG_SERVER
+ Syslog syslog(udpClient, SYSLOG_SERVER, SYSLOG_PORT, SYSLOG_NILVALUE, SYSLOG_NILVALUE, LOG_USER);
+#endif
+AsyncWebServer server(80);
+
+#pragma endregion
+//==============================================================================
 #pragma region Configuration and Statistics
 
+String CSV_lastModified;
 
 struct stats_t {
     unsigned n_cmds_ok;
@@ -281,86 +327,30 @@ const std::map<const std::string, conv_t> config_mapper = {
     }},
     { "ncmdsok", {
         []() { return String( stats.n_cmds_ok ); },
-        [](const AsyncWebParameter* wp) { }
+        NULL
     }},
     { "ncmdserr", {
         []() { return String( stats.n_cmds_err ); },
-        [](const AsyncWebParameter* wp) { }
+        NULL
+    }},
+    { "ncommands", {
+        []() { return String(srCommands.count()); },
+        NULL
     }},
     { "version", {
         []() { return String(VERSION); },
-        [](const AsyncWebParameter* wp) { }
+        NULL
+    }},
+    { "csv_version", {
+        []() { return CSV_lastModified; },
+        NULL
     }},
     { "hostname", {
         []() { return String(WiFi.getHostname()); },
-        [](const AsyncWebParameter* wp) { }
+        NULL
     }},
 };
 
-
-#pragma endregion
-//==============================================================================
-#pragma region Global variables
-
-#define GREEN_OK ANSI_BRIGHT_GREEN "OK " ANSI_RESET
-
-char msgbuf[256];
-
-StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
-
-I2SClass tx_i2s;
-MyRxI2SClass rx_i2s;
-
-//----- I2S raw data buffers, these depend on the selected word size
-tx_raw_t tx_buf[TX_BUFLEN * TX_NCHANNELS];
-#ifndef USE_SR
- rx_raw_t rx_buf[RX_BUFLEN * RX_NCHANNELS];
-#endif
-
-// all buffers below are always 16 bit mono, independent of I2S word size
-
-//----- RX buffer for entire recording, in mono 16 bits for a WAV file
-wav_buffer_t voice;
-size_t   voice_samples; // number of valid samples in voice buffer
-
-wav_buffer_t wav;           // waveform received via MQTT
-char* wav_byte_ptr;     // byte-wise pointer into wav.buf during collection
-unsigned wav_sample_rate;   // sample rate of the WAV file being collected
-
-wav_buffer_t beep_hello;
-wav_buffer_t beep_wake;
-wav_buffer_t beep_error;
-
-/*
- estimated memory consumption
-    ESP_SR buffer  4K   1024 samples * 2 channels * 2 bytes
-    ESP AFE:      73K   according to https://docs.espressif.com/projects/esp-sr/en/latest/esp32/esp-sr-en-master-esp32.pdf
-    ESP Wakenet:  15K   according to https://docs.espressif.com/projects/esp-sr/en/latest/esp32/esp-sr-en-master-esp32.pdf
-    ESP Multinet5:13K   according to https://docs.espressif.com/projects/esp-sr/en/latest/esp32/esp-sr-en-master-esp32.pdf
-    MQTT buffer    4K
-    Task stacks  144K   18 tasks x 8k each
-          total: 255K
-      free heap:  13K
-            sum: 268K
-            
-     total heap: 280K
-*/
-
-//----- state indicators, may be set by one task and read by another
-volatile bool hasRecord = false;    ///< voice recording complete, ready to be written to FTP
-volatile bool isRecording = false;  ///< is currently recording voice from mic or SR input
-volatile bool isPlaying = false;    ///< is currently playing a WAV file from memory
-volatile bool isCollecting = false; ///< is currently receiving a WAV file via MQTT
-
-//---- network stuff
-
-WiFiUDP udpClient;
-NTPClient ntpClient(udpClient);
-SimpleMqttClientESP mqttClient( MQTT_BROKER_RHASSPY );
-#ifdef SYSLOG_SERVER
- Syslog syslog(udpClient, SYSLOG_SERVER, SYSLOG_PORT, SYSLOG_NILVALUE, SYSLOG_NILVALUE, LOG_USER);
-#endif
-AsyncWebServer server(80);
 
 #pragma endregion
 //==============================================================================
@@ -768,35 +758,6 @@ bool i2s_rx_initialize()
 }
 
 
-#ifndef USE_SR
-/**
- * @brief Task to read from I2S microphone. This is only used if we are not doing SR
- * 
- * @param userData 
- */
-void i2s_rx_task( void* userData )
-{
-    size_t bytes_received = 0;
-    size_t bytes_expected = RX_BUFLEN * sizeof(rx_raw_t) * RX_NCHANNELS;
-
-    while (1) {
-        /* Read i2s data */
-        bytes_received = rx_i2s.readBytes( (char*)rx_buf, bytes_expected );
-        if (bytes_received>0) {
-            if (bytes_received != bytes_expected)
-                log_e("i2s read: expected %d bytes, got %d bytes", bytes_expected, bytes_received );
-            if (isRecording) {
-                if (!copy_buf_to_voice(rx_buf, bytes_received))
-                    stop_recording();
-            }
-        } else {
-            log_e("Read Task: i2s read failed");
-        }
-        vTaskDelay(1);
-    }
-}
-#endif // USE_SR
-
 #pragma endregion
 //==============================================================================
 #pragma region Voice recording and playback
@@ -904,11 +865,7 @@ void poll_Button()
     if (new_press != old_press) {
         old_press = new_press;
         if (new_press==HIGH) {
-#ifdef USE_SR
             sr_rx_min_L = sr_rx_max_L = sr_rx_min_R = sr_rx_max_R = 0;
-#else
-            start_recording();
-#endif
         }
     }
 }
@@ -1134,7 +1091,7 @@ const char* mqtt_format = R"rawliteral({
  */
 void publish_command( int id )
 {
-    command_info_t* pinfo = get_sr_info_from_id(id);
+    const command_info_t* pinfo = srCommands[id];
     if (pinfo==NULL) {
         log_e("unknown command %d",id);
     } else {
@@ -1227,7 +1184,6 @@ bool initMQTT()
 #pragma endregion
 //==============================================================================
 #pragma region ESP-SR
-#ifdef USE_SR
 
 
 static void print_commands()
@@ -1239,11 +1195,11 @@ static void print_commands()
 
     for (int i=0; i<n_sr_commands; i++) {
         DebugSerial.printf("%-20s|%-20s|%-10s|%-15s|%-10s\n",
-            command_infos[i].grapheme,
-            command_infos[i].phoneme,
-            command_infos[i].action,
-            command_infos[i].itemname,
-            command_infos[i].value
+            sr_command_infos[i].grapheme,
+            sr_command_infos[i].phoneme,
+            sr_command_infos[i].action,
+            sr_command_infos[i].itemname,
+            sr_command_infos[i].value
         );
     }
 #endif
@@ -1266,17 +1222,22 @@ bool load_sr_commands()
 
     HTTPClient httpClient;
     httpClient.begin( CSV_COMMANDS_URL );
+    const char* headerNames[] = { "Last-Modified" };
+    httpClient.collectHeaders(headerNames,1);
     int res = httpClient.GET();
     if (res==200) {
         csv = httpClient.getString();
+        CSV_lastModified = httpClient.header("Last-Modified");
     } else {
         log_e(ANSI_BRIGHT_RED "HTTP error %d" ANSI_RESET,res);
     }
 
     if (csv.length() > 0) {
         // got CSV file from HTTP server
-        log_i(GREEN_OK "Read SR commands from\n '" ANSI_BLUE "%s" ANSI_RESET "'",
-            CSV_COMMANDS_URL );
+        log_i(GREEN_OK "Read SR commands from\n '" ANSI_BLUE "%s" ANSI_RESET "' (%s)",
+            CSV_COMMANDS_URL,
+            CSV_lastModified.c_str()
+        );
     } else {
         log_w( ANSI_RED "can't download commands file %s" ANSI_RESET, 
             CSV_COMMANDS_URL );
@@ -1290,7 +1251,7 @@ bool load_sr_commands()
         log_i(GREEN_OK "Read SR commands from '" ANSI_BLUE "%s" ANSI_RESET "'",
             CSV_COMMANDS_LOCAL );
     }
-    parse_commands_csv(csv.c_str());
+    srCommands.parse_csv(csv.c_str());
     print_commands();
     return true;
 }
@@ -1304,7 +1265,7 @@ bool load_sr_commands()
 void reportCommand( int id )
 {
 //#if CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL > 3
-    command_info_t* pinfo = get_sr_info_from_id(id);
+    const command_info_t* pinfo = srCommands[id];
     if (pinfo==NULL) {
         log_e("unknown command %d",id);
     } else {
@@ -1393,24 +1354,14 @@ void init_SR()
 
     ESP_SR.onEvent(onSrEvent);
     
-#if (ESP_ARDUINO_VERSION > ESP_ARDUINO_VERSION_VAL(3, 3, 0)) && !defined(USE_SRX)
     bool ok = ESP_SR.begin( 
                 rx_i2s, 
                 sr_commands, 
-                n_sr_commands, 
+                sr_commands ? srCommands.count() : 0, 
                 SR_CHANNELS, 
-                SR_MODE_WAKEWORD, 
+                SR_MODE_WAKEWORD,
                 INPUT_FORMAT 
             );    
-#else
-    bool ok = ESP_SR.begin( 
-                rx_i2s, 
-                sr_commands, 
-                sr_commands ? n_sr_commands : 0, 
-                SR_CHANNELS, 
-                SR_MODE_WAKEWORD 
-            );    
-#endif
     if (ok)
         log_i(GREEN_OK "ESP_SR.begin()");
     else
@@ -1419,8 +1370,8 @@ void init_SR()
 #ifdef USE_SR_COMMANDS
     free(sr_commands);
 #else
-    if (fill_sr_commands_esp())
-        log_i("Sent %u commands to ESP-SR", n_sr_commands );
+    if (srCommands.fill())
+        log_i("Sent %u commands to ESP-SR", srCommands.count() );
     else
         log_e("Error in fill_sr_commands_esp()");
 #endif
@@ -1428,7 +1379,6 @@ void init_SR()
 }
 
 
-#endif // USE_SR
 #pragma endregion
 //==============================================================================
 #pragma region load WAV files from SPIFFS
@@ -1518,31 +1468,24 @@ static const char *htmlContent PROGMEM = R"rawliteral(
 #endif // GET_HTML_FROM_CODE
 
 
-#ifdef GET_HTML_FROM_SERVER
 /* 
     for debugging, we can get the index.html file from an external HTTP server, 
     before serving it ourselves. This way, the HTML code can be edited and tested 
     quickly without flashing anything to the ESP
 */
-char html_buf[4096];
 
-const char* get_index_html()
+String get_index_html_from_server()
 {
     HTTPClient httpClient;
-    String s;
+    String s("");
     httpClient.begin( "http://file-server/ota/index.html" );
     int res = httpClient.GET();
     if (res==200) {
         s = httpClient.getString();
-        strncpy( html_buf, s.c_str(), sizeof(html_buf));
-        log_i("read index.html %u bytes",strlen(html_buf));
-        return html_buf;
-    } else {
-        html_buf[0] = '\0';
-        return html_buf;
+        log_i("read index.html %u bytes",s.length());
     }
+    return s;
 }
-#endif // GET_HTML_FROM_SERVER
 
 
 /**
@@ -1590,7 +1533,8 @@ void processParams( AsyncWebServerRequest *request )
                 item.first.c_str(), 
                 wp->value().c_str()
             );
-            item.second.toValue(wp);
+            if (item.second.toValue)
+                item.second.toValue(wp);
         }
     }
 }
@@ -1605,7 +1549,7 @@ void init_Webserver()
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
         log_i(HTTPD "request " ANSI_BLUE "/" ANSI_RESET);
 #if defined(GET_HTML_FROM_SERVER) 
-        request->send(200,"text/html",get_index_html(),my_processor);
+        request->send(200,"text/html",get_index_html_from_server(),my_processor);
 #elif defined(GET_HTML_FROM_CODE)
         request->send(200,"text/html",htmlContent,my_processor);
 #elif defined(GET_HTML_FROM_FLASH)
@@ -1624,6 +1568,17 @@ void init_Webserver()
     server.on("/set", [](AsyncWebServerRequest *request) {
         log_i(HTTPD "request " ANSI_BLUE "/set" ANSI_RESET);
         processParams(request);
+        request->redirect("/");
+    });
+    server.on("/update", [](AsyncWebServerRequest *request) {
+        log_i(HTTPD "request " ANSI_BLUE "/update" ANSI_RESET);
+        String s = get_index_html_from_server();
+        File f = LittleFS.open("/index.html","w");
+        if (f) {
+            f.print(s);
+            f.close();
+            log_i("updated index.html in flash, %u bytes",s.length());
+        }
         request->redirect("/");
     });
 
@@ -1687,6 +1642,9 @@ void setup()
     DebugSerial.println(VERSION);
     printResetReason(DebugSerial);
 
+    setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);    // Europe/Berlin
+    tzset();
+
     if (!init_FS()) fail("LittleFS mount failed"); 
 
     //----- I2S
@@ -1735,16 +1693,10 @@ void setup()
 #endif
     ntpClient.begin(); 
     ntpClient.update(); 
-    setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);    // Europe/Berlin
-    tzset();
 
     start_playing( beep_hello );
 
-#ifdef USE_SR
     init_SR();
-#else
-    xTaskCreate(i2s_rx_task, "i2s_rx_task", 4000, NULL, 1, NULL);
-#endif
 
     reportTasks();
     printMemoryInfo(DebugSerial);

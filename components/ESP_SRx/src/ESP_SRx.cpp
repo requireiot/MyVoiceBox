@@ -31,10 +31,11 @@ bool ESP_SRx_Class::begin(
   const sr_cmd_t *sr_commands, 
   size_t sr_commands_len, 
   sr_channels_t rx_chan, 
-  sr_mode_t mode
+  sr_mode_t mode,
+  const char *input_format
 ) {
   i2s = &_i2s;
-  esp_err_t err = srx_start(on_srx_fill, this, rx_chan, mode, sr_commands, sr_commands_len, on_srx_event, this);
+  esp_err_t err = srx_start(on_srx_fill, this, rx_chan, mode, input_format, sr_commands, sr_commands_len, on_srx_event, this);
   return (err == ESP_OK);
 }
 

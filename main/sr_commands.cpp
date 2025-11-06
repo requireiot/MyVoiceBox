@@ -5,7 +5,7 @@
  * @date        2025-10-15
  * tabsize  4
  * 
- * This Revision: $Id: parse_sr_commands.cpp 1906 2025-11-01 12:01:24Z  $
+ * This Revision: $Id: sr_commands.cpp 1913 2025-11-06 13:02:38Z  $
  */
 
 /*
@@ -23,7 +23,7 @@
  * 
  * CSV file is formatted like so
  * 
- *  grapheme,phoneme,action,topic,value
+ *  grapheme,phoneme,action,itemname,label,value
  *  "Turn on the light","TkN nN jc LiT","switch","KitchenLight","kitchen light,"ON"
  *  "Turn off the light","TkN eF jc LiT","switch","KitchenLight","kitchen light,"OFF"
  */
@@ -33,30 +33,17 @@
 #include <string.h>
 #include <ctype.h>
 
-//#include "ESP_SRx.h"
 #include "esp_mn_speech_commands.h"
 #include "esp32-hal-sr.h"
 #include "esp32-hal-log.h"
-#include "parse_sr_commands.h"
 #include "sdkconfig.h"
 
+#include "sr_commands.h"
+
 /// @brief  array with info about all commands
-struct command_info_t *command_infos = NULL;
+//struct command_info_t *sr_command_infos = NULL;
 /// @brief number of commands parsed from CSV text
-size_t n_sr_commands = 0;
-
-
-/**
- * @brief Resize `command_infos` to hold one one element
- * 
- * @return command_info_t*  pointer to new element
- */
-static command_info_t* add_command() 
-{
-    n_sr_commands++;
-    command_infos = (command_info_t*) realloc( command_infos, n_sr_commands * sizeof(command_info_t) );
-    return command_infos + (n_sr_commands-1);
-}
+//size_t n_sr_commands = 0;
 
 
 /**
@@ -115,25 +102,44 @@ static char* next_line( char** text )
 
 
 /**
- * @brief Parse CVS-formatted multi-line string in `csv` and fill `command_infos` array.
- * Creates (on the heap) a coy of the `csv` source, this copy persists after return 
+ * @brief Resize `sr_command_infos` to hold one one more element
+ * 
+ * @return command_info_t*  pointer to new element
+ */
+command_info_t* SR_Commands::add_command() 
+{
+    _n_commands++;
+    _commands = (command_info_t*) realloc( _commands, _n_commands * sizeof(command_info_t) );
+    return _commands + (_n_commands-1);
+}
+
+
+/**
+ * @brief Parse CVS-formatted multi-line string in `csv` and fill `sr_command_infos` array.
+ * Creates (on the heap) a copy of the `csv` source, this copy persists after return 
  * from this function, so pointers to strings within the copy remain valid.
  * 
  * @param csv 
  * @return true 
  * @return false 
  */
-bool parse_commands_csv( const char* csv )
+bool SR_Commands::parse_csv( const char* csv )
 {
     // let's make a copy of the CSV text on the heap so we can chop it up
-    static char* text = NULL;
-    if (text) free(text);
-    text = (char*) malloc(strlen(csv)+1);
-    strcpy( text, csv );
-    log_d("parsing CSV text = \n'%s'", text );
+    if (_text) free(_text);
+    _text = (char*) malloc(strlen(csv)+1);
+    strcpy( _text, csv );
+
+    // free array buffer, if it has been used before
+    if (_commands) {
+        free(_commands);
+        _commands = NULL;
+    }
+
+    log_d("parsing CSV text = \n'%s'", _text );
 
     char* line;
-    char* ptext = text;
+    char* ptext = _text;
     while (isspace(*ptext)) ptext++;    // ignore leading empty lines
     line = trim_line(next_line(&ptext));
     log_d("header line is '%s'", line);
@@ -150,7 +156,7 @@ bool parse_commands_csv( const char* csv )
         pcommand->label    = trim_quotes( strtok(NULL,",\"") );
         pcommand->value    = trim_quotes( strtok(NULL,",\"") );
     }
-    log_i("parsed %d commands",(int)n_sr_commands);
+    log_i("parsed %d commands",(int)_n_commands);
     return true;
 }
 
@@ -161,7 +167,7 @@ bool parse_commands_csv( const char* csv )
  * @return true 
  * @return false 
  */
-bool fill_sr_commands_esp()
+bool SR_Commands::fill()
 {
 // if Multinet7 is selected, then we rely on specifying commands at compile time
 #if defined(CONFIG_SR_MN_EN_MULTINET7_QUANT)
@@ -171,7 +177,7 @@ bool fill_sr_commands_esp()
     bool ok;
     ok = (ESP_OK==esp_mn_commands_clear());
     int i; command_info_t* pinfo;
-    for (i=1, pinfo=command_infos; i <= n_sr_commands; i++, pinfo++) {
+    for (i=1, pinfo=_commands; i <= _n_commands; i++, pinfo++) {
 #if defined( CONFIG_SR_MN_EN_MULTINET7_QUANT) || defined(CONFIG_SR_MN_EN_MULTINET6_QUANT)
         ok = ok && (ESP_OK==esp_mn_commands_add(i,pinfo->grapheme));
 #else
@@ -188,14 +194,14 @@ bool fill_sr_commands_esp()
  * 
  * @return sr_cmd_t*  pointer to array, or NULL if out of memory
  */
-sr_cmd_t* build_sr_commands()
+sr_cmd_t* SR_Commands::build_sr_commands()
 {
-    sr_cmd_t* sr_commands = (sr_cmd_t*)malloc(n_sr_commands * sizeof(sr_cmd_t));
+    sr_cmd_t* sr_commands = (sr_cmd_t*)malloc(_n_commands * sizeof(sr_cmd_t));
     if (sr_commands==NULL) return NULL;
-    for (int i=0; i<n_sr_commands; i++) {
+    for (int i=0; i<_n_commands; i++) {
         sr_commands[i].command_id = i+1;
-        strncpy( sr_commands[i].str, command_infos[i].grapheme, SR_CMD_STR_LEN_MAX );
-        strncpy( sr_commands[i].phoneme, command_infos[i].phoneme, SR_CMD_PHONEME_LEN_MAX );
+        strncpy( sr_commands[i].str, _commands[i].grapheme, SR_CMD_STR_LEN_MAX );
+        strncpy( sr_commands[i].phoneme, _commands[i].phoneme, SR_CMD_PHONEME_LEN_MAX );
     }
     return sr_commands;
 }
@@ -204,15 +210,15 @@ sr_cmd_t* build_sr_commands()
 /**
  * @brief Get command info associated with `id`. If the ids presented to ESP-SR 
  * don't start with 0, then the result of this function is not equal to 
- * command_infos[id]
+ * sr_command_infos[id]
  * 
  * @param id                id returned from ESP-SR
  * @return command_info_t*  pointer to corresponding command info
  */
-command_info_t* get_sr_info_from_id( int id )
+const command_info_t* SR_Commands::get_info( int id )
 {
-    if ((id > 0) && (id <= n_sr_commands))
-        return command_infos+(id-1);
+    if ((id > 0) && (id <= _n_commands))
+        return _commands+(id-1);
     else
         return NULL;
 }

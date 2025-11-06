@@ -4,10 +4,10 @@
     <title>MyVoiceBox : %HOSTNAME%</title>
   <style>
     body { background-color: #cccccc; font-family: Arial, Helvetica, Sans-Serif; Color: #000088; line-height: 1.1; }
-    button { margin: 0px; padding: 5px 0px 5px 0px; min-height:20px; min-width: 80px; float:right; }
+    button { margin: 0px 0px 0px 10px; padding: 5px 0px 5px 0px; min-height:20px; min-width: 80px; float:right; }
     .version { color: #808080; font-size:smaller; }
 	#wrapper fieldset { 
-      float: left; width: 40%%; 
+      float: left; width: 45%%; 
       box-sizing: border-box;         
 	}
     .footer {
@@ -54,14 +54,19 @@
   </fieldset>
   <fieldset>
     <legend><i>&nbsp;Statistics&nbsp;</i></legend>
-    <p><b>%NCMDSOK%</b> commands recognized</p>
+    <p><b>%NCOMMANDS%</b> commands defined</p>
+    <p><b>%NCMDSOK%</b> commands detected</p>
     <p><b>%NCMDSERR%</b> timeouts</p>
-    <form action="/clear"><button type="submit">Clear</button></form>
+	<form action="/clear"><button type="submit">Clear</button></form>
+  </fieldset>
+  <fieldset>
+    <legend><i>&nbsp;Version&nbsp;</i></legend>
+    <p class="version"><b>Firmware:</b><br/>%VERSION%</p>
+	<p class="version"><b>HTML:</b><br/>$Id: index.html 1913 2025-11-06 13:02:38Z  $</p>
+	<p class="version"><b>Commands:</b><br/>%CSV_VERSION%</p>
+	<form action="/update"><button type="submit">Update</button></form>
   </fieldset>
   </div>
   </section>
-<div class="footer">
-  <p class="version">%VERSION%</p>
-</div>
 </body>
 </html>
