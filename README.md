@@ -26,6 +26,7 @@
   - [Acoustic "debugging"](#acoustic-debugging)
 - [Alternatives](#alternatives)
 - [References](#references)
+- [License](#license)
 
 ## Objective
 
@@ -74,7 +75,7 @@ You will need
 
 ### Hardware
 
-<img src="pictures/D-top.jpg" alt="top view" width="450"> <img src="pictures/D-bottom.jpg" alt="bottom view" width="450">
+<img src="pictures/D-top.jpg" alt="top view" width="400"> <img src="pictures/D-bottom.jpg" alt="bottom view" width="400">
 
 Follow the [schematic](hardware/MyVoiceBox.pdf) to build the hardware. For production units, I used a "bare" ESP32-S3-WROOM-1 N16R8 on a prototype board that has a footprint for an ESP32 module ... the pinout is similar enough so I could place the ESP32-**S3** module on the footprint intended for a "plain" ESP32. Ignore the labels on the board, the pinout of an ESP32-S3 is different from an ESP, except the GND, 3v3, TxD and RxD signals, which are on the same pins for both modules.
 
@@ -380,3 +381,7 @@ Possible alternatives to this project, with similar objectives and features are
 
 - INMP441 digital microphone [datasheet](https://invensense.tdk.com/wp-content/uploads/2015/02/INMP441.pdf)
 - MAX98357A I2S PCM class D amplifier [datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf)
+
+## License
+
+The code and schematics I created for this project are under an MIT license, see [LICENSE.txt](LICENSE.txt). Folder `components/` contains libraries cloned from other repositries, which may be under a different license, see each folder for more details.
