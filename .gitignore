@@ -5,6 +5,7 @@ sdkconfig.old
 .svn
 datasheets/
 test/
+wav/
 hardware/MyVoiceBox-backups/
 managed_components/
 main/myauth.h 

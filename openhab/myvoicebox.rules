@@ -1,0 +1,108 @@
+/*
+   Rules to handle incoming voice commands.
+	
+   Copyright (C) 2025 Bernd Waldmann
+
+   This Source Code Form is subject to the terms of the Mozilla Public License, 
+   v. 2.0. If a copy of the MPL was not distributed with this file, You can 
+   obtain one at http://mozilla.org/MPL/2.0/
+
+   SPDX-License-Identifier: MPL-2.0
+*/
+
+
+/* respond to a voice command like "turn XYZ on" */
+rule "Rhasspy switchIntent message"
+when 
+    Item Rhasspy_Intent_Switch received update
+then 
+    val String json = newState.toString
+    val String rawInput = transform("JSONPATH","$.rawInput", json)
+    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
+    val String itemState = transform("JSONPATH","$.slots[?(@.entity=='state')].value.value", json).toUpperCase
+    val String siteId = transform("JSONPATH","$.siteId", json)
+    logInfo("voice","Site {} heard '{}'", siteId, rawInput )
+
+    // set the item as requested
+    val theItem = gVA.members.findFirst[ t | t.name==itemName] as SwitchItem
+    if (theItem !== null) {
+        theItem.sendCommand(itemState)
+    } else {
+        logInfo("voice","ERROR: no item named '{}'", itemName)    
+    }
+end 
+
+
+/* handle a voice command such as "set dimmer to low" */
+rule "Rhasspy dimcatIntent message"
+when 
+    Item Rhasspy_Intent_DimCat received update
+then 
+    val String json = newState.toString
+    val String rawInput = transform("JSONPATH","$.rawInput", json)
+    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
+    val String siteId = transform("JSONPATH","$.siteId", json)
+    val String itemState = transform("JSONPATH","$.slots[?(@.entity=='state')].value.value", json)
+    logInfo("voice","Site {} heard '{}'", siteId, rawInput )
+
+    val String percentS = transform("MAP","cat2num.map",itemState)
+    val Number percent = Float::parseFloat(percentS).intValue
+    logInfo("voice","COMMAND '{}', set dimmer {} to {} percent", rawInput, itemName, percent )
+
+    val theItem = gVD.members.findFirst[ t | t.name==itemName] as DimmerItem
+    if (theItem !== null) {
+        theItem.sendCommand(percent)
+    } else {
+        logInfo("voice","ERROR: no item named '{}'", itemName)    
+    }
+end 
+
+
+/* handle a voice scene selection such as "lets watch TV" */
+rule "Rhasspy VoiceScene message"
+when 
+    Item Rhasspy_Intent_Scene received update
+then 
+    val String json = newState.toString
+    val String rawInput = transform("JSONPATH","$.rawInput", json)
+    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
+    val String siteId = transform("JSONPATH","$.siteId", json)
+    logInfo("voice","Site {} heard '{}', select scene '{}'", siteId, rawInput, itemName )
+
+    val theItem = gVS.members.findFirst[ t | t.name==itemName] as SwitchItem
+    if (theItem !== null) {
+        theItem.sendCommand(ON)
+    }
+end 
+
+
+/* handle a voice query such as "what is the temperature?" */
+rule "Rhasspy VoiceQuestion message"
+when 
+    Item Rhasspy_Intent_Query received update
+then 
+    val String json = newState.toString
+    val String rawInput = transform("JSONPATH","$.rawInput", json)
+    val String topic = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].rawValue", json).toLowerCase
+    val String siteId = transform("JSONPATH","$.siteId", json)
+    val String roomName = transform("MAP","stt_to_room.map",siteId)
+    logInfo("voice","Site {} heard '{}', ask about '{}'", siteId, rawInput, topic )
+
+    var String answer = " I don't know"
+
+    if (topic=="temperature") {
+        answer = "the temperature is " 
+        + String::format("%.0f", (localCurrentTemperature.state as DecimalType).floatValue )
+        + " degrees"
+    } // else { add more topics here as needed
+
+    // where should the answer be heard?
+    val sinkName = siteId.replace("-","_")
+    val sinkItem = gSay.members.findFirst[ t | t.name=="say_"+sinkName] as StringItem
+    if (sinkItem !== null) {
+        sinkItem.sendCommand(answer)
+    }
+    logInfo("voice","QUESTION '{}' to '{}', ANSWER '{}' to '{}'", topic, siteId, answer, sinkName)
+end 
+
+

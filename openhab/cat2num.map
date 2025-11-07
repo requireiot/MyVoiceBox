@@ -1,0 +1,6 @@
+# convert dimmer category to numerical dimmer value
+low=10
+medium=50
+high=100
+off=0
+=0

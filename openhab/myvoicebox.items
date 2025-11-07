@@ -1,0 +1,19 @@
+/*
+	example snippet defining *items* needed for integration of MyVoiceBox or Rhasspy into OpenHAB
+*/
+
+
+/* incoming MQTT messages when a voice command has been recognized
+
+String  Rhasspy_Intent_Switch "Intent: switch" { channel="mqtt:topic:rh-mq:VoiceCommands:switchIntent" }
+String  Rhasspy_Intent_DimCat "Intent: dimmer" { channel="mqtt:topic:rh-mq:VoiceCommands:dimcatIntent" }
+String  Rhasspy_Intent_Query  "Intent: query"  { channel="mqtt:topic:rh-mq:VoiceCommands:queryIntent" }
+String  Rhasspy_Intent_Scene  "Intent: scene"  { channel="mqtt:topic:rh-mq:VoiceCommands:sceneIntent" }
+
+
+/*  outgoing MQTT messages trat trigger the TTS engine.
+	Assigning a text value to this String will cause the text to be spoken on the corresponding satellite
+*/
+
+String say_raspi14          (gSay) { channel="mqtt:topic:rh-mq:say:raspi14" }
+String say_esp32s3_56BCFC   (gSay) { channel="mqtt:topic:rh-mq:say:esp32s3_56BCFC" }

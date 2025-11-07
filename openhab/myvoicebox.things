@@ -1,0 +1,34 @@
+/*
+	example snippet defining *things* needed for integration of MyVoiceBox or Rhasspy into OpenHAB
+*/
+
+
+Bridge mqtt:broker:rh-mq "Rhasspy-Mosquitto" @ "System" 
+[ 
+	host="some-server-name.home", 
+	secure=false,
+	clientID="oh4"
+]
+
+
+/* incoming MQTT messages when a voice command has been recognized
+
+Thing mqtt:topic:rh-mq:VoiceCommands (mqtt:broker:rh-mq) {
+  Channels:
+    Type string: switchIntent  [ stateTopic="hermes/intent/switch" ]
+    Type string: queryIntent   [ stateTopic="hermes/intent/query" ]
+    Type string: sceneIntent   [ stateTopic="hermes/intent/scene" ]
+    Type string: dimcatIntent  [ stateTopic="hermes/intent/dim_cat" ]
+}
+
+
+/* outgoing MQTT messages trat trigger the TTS engine */
+
+Thing mqtt:topic:rh-mq:say (mqtt:broker:rh-mq) {
+  Channels:
+    Type string: raspi14  [ commandTopic="hermes/tts/say", 
+                            formatBeforePublish="{\"text\":\"%s\",\"siteId\":\"raspi14\"}" ]
+    Type string: esp32s3_56BCFC  [ commandTopic="hermes/tts/say", 
+                            formatBeforePublish="{\"text\":\"%s\",\"siteId\":\"esp32s3-56BCFC\"}" ]
+}
+

@@ -10,11 +10,8 @@
   - [Mechanical construction](#mechanical-construction)
   - [Firmware](#firmware)
   - [OpenHAB integration](#openhab-integration)
-    - [Conventions](#conventions)
-    - [STT](#stt)
-    - [TTS](#tts)
-    - [Rules](#rules)
   - [Rhasspy integration](#rhasspy-integration)
+- [Web interface](#web-interface)
 - [Technical considerations](#technical-considerations)
   - [Microphone](#microphone)
   - [Attenuating the speaker signal](#attenuating-the-speaker-signal)
@@ -100,8 +97,6 @@ I used a 100x60x25mm plastic box for the project. Here is how I placed the micro
 
 ### OpenHAB integration
 
-#### Conventions
-
 * for all OpenHAB *items* to be voice controlled, the item label is the name used in the voice command
 * all OpenHAB *items* that can be **switched** on and off are assigned to group `gVA`. This creates voice commands "*turn on `name`*" and "*turn off `name`*".
 * all OpenHAB *items* that can be **dimmed** are assigned to group `gVD`. This creates voice commands "*dim `name` to low|medium|high|off*".
@@ -116,163 +111,9 @@ So my OpenHAB items definition file `/etc/openhab/items/voice.items` file might 
  Number localTemp       "temperature [%.0f°C]" (gVQ) { ... some binding ... }
 ```
 
-#### STT
+See [openhab/myvoicebox.things](openhab/myvoicebox.things) and [openhab/myvoicebox.items](openhab/myvoicebox.items) for examples of things and items definitions needed for the integration, and [openhab/myvoicebox.rules](openhab/myvoicebox.rules) for examples of rules that respond to incoming MQTT messages for each type of voice command.
 
-To capture the intent information sent by the ESP32-S3 module via MQTT, there is one *thing* and one *item* per category
-
-In `rhasspy.things`
-```
-Thing mqtt:topic:rh-mq:VoiceCommands (mqtt:broker:rh-mq) {
-  Channels:
-    Type string: switchIntent  [ stateTopic="hermes/intent/switch" ]
-    Type string: queryIntent   [ stateTopic="hermes/intent/query" ]
-    Type string: sceneIntent   [ stateTopic="hermes/intent/scene" ]
-    Type string: dimcatIntent  [ stateTopic="hermes/intent/dim_cat" ]
-}
-```
-In `rhasspy.items`
-```
-String  Rhasspy_Intent_Switch "Intent: switch" { channel="mqtt:topic:rh-mq:VoiceCommands:switchIntent" }
-String  Rhasspy_Intent_DimCat "Intent: dimmer" { channel="mqtt:topic:rh-mq:VoiceCommands:dimcatIntent" }
-String  Rhasspy_Intent_Query  "Intent: query"  { channel="mqtt:topic:rh-mq:VoiceCommands:queryIntent" }
-String  Rhasspy_Intent_Scene  "Intent: scene"  { channel="mqtt:topic:rh-mq:VoiceCommands:sceneIntent" }
-```
-
-#### TTS
-For each text-to-speech destination, whether it is a Raspberry Pi based Rhasspy satellite, or an ESP32-S3 module from this project, there is a channel in a *thing* and an *item*, refering to the Rhasspy `siteId` or ESP hostname:
-
-In `rhasspy.things`
-```
-Thing mqtt:topic:rh-mq:say (mqtt:broker:rh-mq) {
-  Channels:
-    Type string: raspi14  [ commandTopic="hermes/tts/say", 
-                            formatBeforePublish="{\"text\":\"%s\",\"siteId\":\"raspi14\"}" ]
-    Type string: esp32s3_56BCFC  [ commandTopic="hermes/tts/say", 
-                            formatBeforePublish="{\"text\":\"%s\",\"siteId\":\"esp32s3-56BCFC\"}" ]
-}
-
-```
-In `rhasspy.items`
-```
-String say_raspi14          (gSay) { channel="mqtt:topic:rh-mq:say:raspi14" }
-String say_esp32s3_56BCFC   (gSay) { channel="mqtt:topic:rh-mq:say:esp32s3_56BCFC" }
-```
-
-#### Rules
-
-One rule handles incoming voice commands to **switch** something
-```
-/* respond to a voice command like "turn XYZ on" */
-rule "Rhasspy switchIntent message"
-when 
-    Item Rhasspy_Intent_Switch received update
-then 
-    val String json = newState.toString
-    val String rawInput = transform("JSONPATH","$.rawInput", json)
-    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
-    val String itemState = transform("JSONPATH","$.slots[?(@.entity=='state')].value.value", json).toUpperCase
-    val String siteId = transform("JSONPATH","$.siteId", json)
-    logInfo("voice","Site {} heard '{}'", siteId, rawInput )
-
-    // set the item as requested
-    val theItem = gVA.members.findFirst[ t | t.name==itemName] as SwitchItem
-    if (theItem !== null) {
-        theItem.sendCommand(itemState)
-    } else {
-        logInfo("voice","ERROR: no item named '{}'", itemName)    
-    }
-end 
-```
-
-A similar rule handles incoming voice commands to **dim** something
-```
-/* handle a voice command such as "set dimmer to low" */
-rule "Rhasspy dimcatIntent message"
-when 
-    Item Rhasspy_Intent_DimCat received update
-then 
-    val String json = newState.toString
-    val String rawInput = transform("JSONPATH","$.rawInput", json)
-    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
-    val String siteId = transform("JSONPATH","$.siteId", json)
-    val String itemState = transform("JSONPATH","$.slots[?(@.entity=='state')].value.value", json)
-    logInfo("voice","Site {} heard '{}'", siteId, rawInput )
-
-    val String percentS = transform("MAP","cat2num.map",itemState)
-    val Number percent = Float::parseFloat(percentS).intValue
-    logInfo("voice","COMMAND '{}', set dimmer {} to {} percent", rawInput, itemName, percent )
-
-    val theItem = gVD.members.findFirst[ t | t.name==itemName] as DimmerItem
-    if (theItem !== null) {
-        theItem.sendCommand(percent)
-    } else {
-        logInfo("voice","ERROR: no item named '{}'", itemName)    
-    }
-end 
-```
-The transformation from categories low|medium|high|off to percentages is done via a map transform, defined in `/etc/openhab/transform/cat2num.map`
-```
-# convert dimmer category to numerical dimmer value
-low=10
-medium=50
-high=100
-off=0
-=0
-```
-
-A voice command to select a lighting **scene** is handled by a simple rule that turns on the virtual switch for that scene
-```
-/* handle a voice scene selection such as "lets watch TV" */
-rule "Rhasspy VoiceScene message"
-when 
-    Item Rhasspy_Intent_Scene received update
-then 
-    val String json = newState.toString
-    val String rawInput = transform("JSONPATH","$.rawInput", json)
-    val String itemName = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].value.value", json)
-    val String siteId = transform("JSONPATH","$.siteId", json)
-    logInfo("voice","Site {} heard '{}', select scene '{}'", siteId, rawInput, itemName )
-
-    val theItem = gVS.members.findFirst[ t | t.name==itemName] as SwitchItem
-    if (theItem !== null) {
-        theItem.sendCommand(ON)
-    }
-end 
-```
-
-Separate rules then respond when a "scene switch" is turned on, but this is outside the scope of this project.
-
-Finally, a voice command that **asks** about an item is handled by this rule:
-```
-/* handle a voice query such as "what is the temperature?" */
-rule "Rhasspy VoiceQuestion message"
-when 
-    Item Rhasspy_Intent_Query received update
-then 
-    val String json = newState.toString
-    val String rawInput = transform("JSONPATH","$.rawInput", json)
-    val String topic = transform("JSONPATH","$.slots[?(@.entity=='oh_items')].rawValue", json).toLowerCase
-    val String siteId = transform("JSONPATH","$.siteId", json)
-    val String roomName = transform("MAP","stt_to_room.map",siteId)
-    logInfo("voice","Site {} heard '{}', ask about '{}'", siteId, rawInput, topic )
-
-    var String answer = " I don't know"
-
-    if (topic=="temperature") {
-        answer = "the temperature is " 
-        + String::format("%.0f", (localCurrentTemperature.state as DecimalType).floatValue )
-        + " degrees"
-    } // else { add more topics here as needed
-
-    // where should the answer be heard?
-    val sinkName = siteId.replace("-","_")
-    val sinkItem = gSay.members.findFirst[ t | t.name=="say_"+sinkName] as StringItem
-    if (sinkItem !== null) {
-        sinkItem.sendCommand(answer)
-    }
-    logInfo("voice","QUESTION '{}' to '{}', ANSWER '{}' to '{}'", topic, siteId, answer, sinkName)
-end 
-```
+Note that this is not a complete OpenHAB configuration, just snippets to illustrate how OpenHAB has to be configured.
 
 ### Rhasspy integration
 
@@ -295,7 +136,7 @@ lets ($oh_items,gVS){topic}
 set ($oh_items,gVD){itemName} to (low | medium | high){state}
 ```
 
-This relies on a Python script at  which queries OpenHAB and assembles a list of item names assigned to one of the voice-related groups. The script is stored in `~/.config/rhasspy/profiles/en/slot_programs/oh_item` on the machien running Rhasspy and contains
+This relies on a Python script at  which queries OpenHAB and assembles a list of item names assigned to one of the voice-related groups. The script is stored in `~/.config/rhasspy/profiles/en/slot_programs/oh_item` on the machine running Rhasspy and contains
 ``` Python
 #!/usr/bin/python3
 from requests import get
@@ -319,6 +160,24 @@ for item in items:
         friendly_name = item['label']
         print(f"({friendly_name}):{name}")
 ```
+
+## Web interface
+
+<img src="pictures/screenshot.png" alt="top view" width="600">
+
+A simple web frontend assists with troubleshooting. It lets you tweak some operating parameters:
+- **Mic gain** is the amplification applied to the microphone signals while waiting for the wakeword, or while waiting for a command. This is specified in steps of 6 dB, so 1=6dB, 2=12dB etc.
+- Mic gain **during beep** can be lower, to attenuate the beep feeding back into the microphones. I have tzhis set to -3 (18 dB attenuation).
+- **WAV gain** is the gain applied to WAV files received via MQTT, i.e. spoken messages
+- **Beep gain** is the gain applied to internal beeps
+- checking **playback voice** enables replaying the microphone signal immediately after a command has been detected, or timeout occured. This can help to spot audio quality issues.
+- checking **save voice to WAV** will record the voice signal while a command is being spoken, and upload it as a WAV file to an external FTP server. This can help to spot audio quality issues. You must have the name of your FTP server defined in [main/myauth.h](main/myauth.h).
+
+Click the `Save` button after you have made any changes here.
+
+The top right panel shows some simple statistics: how many voice commands were uploaded at startup, and how many times was a command successfully recognized, or did a timeout occur? Click the `Clear` button to reset the counters.
+
+The bottom right panel gives some information about the current version of the firmware, the HTML file that creates the web interface, and the CSV file that was used to import voice command definitions. Click the `Update` button to download the HTML and CSV files from the external server again. You must have the URL of your HTTP server defined in [main/myauth.h](main/myauth.h) for this to work.
 
 ## Technical considerations
 
