@@ -5,7 +5,7 @@
  * Created		: 23-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: SimpleMQTTClientESP.h 1894 2025-10-24 15:18:36Z  $
+ * This Revision: $Id: SimpleMQTTClientESP.h 1916 2025-11-10 11:02:02Z  $
  */
 
 /*
@@ -42,6 +42,7 @@ public:
         : _broker(broker), _receive_cb(nullptr), _connected(false) {}
 
     bool begin( const char* subscribeTopic=nullptr, const char* publishTopic=nullptr );
+    void publish(const char* topic, const char* subtopic,const char* payload, bool retain=false);
     void publish(const char* subtopic,const char* payload, bool retain=false);
     void do_subscribe();
     bool isConnected() const { return _connected; }

@@ -5,7 +5,7 @@
  * Created		: 23-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: SimpleMQTTClientESP.cpp 1906 2025-11-01 12:01:24Z  $
+ * This Revision: $Id: SimpleMQTTClientESP.cpp 1916 2025-11-10 11:02:02Z  $
  */
 
 /*
@@ -248,12 +248,52 @@ void SimpleMqttClientESP::do_subscribe()
 /**
  * @brief Publish a message to MQTT broker
  * 
+ * @param topic       first part of topic for publishing. May contain $(HOSTNAME), 
+ *                      which will be replace by WiFi hostname
+ * @param subtopic    second part of topic for publishing, may be NULL
+ * @param payload     message payload, 0-terminated
+ * @param retain      if true, message is retained by broker 
+ */
+void SimpleMqttClientESP::publish(const char* topic, const char* subtopic, const char* payload, bool retain)
+{
+	if (!isConnected()) return;
+    String sTopic = topic;
+    String sSubtopic = subtopic;
+    if (
+        sTopic.length() > 0
+        && sSubtopic.length() > 0 
+        && !sTopic.endsWith("/")
+        )
+        sTopic += "/";
+    sTopic += sSubtopic;
+    sTopic.replace("${HOSTNAME}",WiFi.getHostname());
+
+    bool ok = (0 <= esp_mqtt_client_publish(_client, sTopic.c_str(), payload, 0, 1, retain));
+    vTaskDelay(1);
+    if (ok) {
+        log_d( TAG
+            "publish\n  topic='" ANSI_CYAN "%s" ANSI_RESET 
+            "'\n  payload='" ANSI_BLUE "%s" ANSI_RESET "'", 
+            topic, 
+            payload ? payload : "(null)"
+        );
+	} else {
+		log_e(TAG "publish " ANSI_RED "fail !" ANSI_RESET);
+	}
+}
+
+
+/**
+ * @brief Publish a message to MQTT broker
+ * 
  * @param subtopic    topic or subtopic. If _publishTopic was defined in begin(), it is prepended
  * @param payload     message payload, 0-terminated
  * @param retain      if true, message is retained by broker 
  */
-void SimpleMqttClientESP::publish(const char* subtopic,const char* payload, bool retain)
+void SimpleMqttClientESP::publish(const char* subtopic, const char* payload, bool retain)
 {
+    publish( _publishTopic.c_str(), subtopic, payload, retain );
+    /*
 	if (!isConnected()) return;
     size_t buflen = strlen(subtopic)+_publishTopic.length()+2;
     char topic[buflen];
@@ -273,4 +313,5 @@ void SimpleMqttClientESP::publish(const char* subtopic,const char* payload, bool
 	} else {
 		log_e(TAG "publish " ANSI_RED "fail !" ANSI_RESET);
 	}
+    */
 }

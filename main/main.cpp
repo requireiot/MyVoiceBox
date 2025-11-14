@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1914 2025-11-06 18:20:37Z  $
+ * This Revision: $Id: main.cpp 1916 2025-11-10 11:02:02Z  $
  */
 
 /*
@@ -62,7 +62,7 @@
 #define DebugSerial Serial0
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1914 2025-11-06 18:20:37Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1916 2025-11-10 11:02:02Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -150,7 +150,7 @@ const char VERSION[] =
 
 #define MQTT_PUB_BASE "hermes"
 
-#define CSV_NAME "/oh_sr_commands.csv"
+//#define CSV_NAME "/oh_sr_commands.csv"
 
 #pragma endregion
 //==============================================================================
@@ -201,6 +201,8 @@ char msgbuf[256];
 
 StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
 
+String sessionId;   // remember the uuid from the MQTT message /hermes/audioServer/$(HOSTNAME)/playBytes/
+
 SR_Commands srCommands;
 
 I2SClass tx_i2s;
@@ -243,7 +245,8 @@ AsyncWebServer server(80);
 //==============================================================================
 #pragma region Configuration and Statistics
 
-String CSV_lastModified;
+String CSV_lastModified("FFS");
+String HTML_lastModified("FFS");
 
 struct stats_t {
     unsigned n_cmds_ok;
@@ -343,6 +346,10 @@ const std::map<const std::string, conv_t> config_mapper = {
     }},
     { "csv_version", {
         []() { return CSV_lastModified; },
+        NULL
+    }},
+    { "html_version", {
+        []() { return HTML_lastModified; },
         NULL
     }},
     { "hostname", {
@@ -484,11 +491,14 @@ void start_playing( wav_buffer_t& wv )
 }
 
 
+void publishFinished();
+
 void stop_playing()
 {
     isPlaying = false;
     play_ptr = play_buf;
     log_i("stop playing");
+    publishFinished();
 }
 
 
@@ -1072,9 +1082,59 @@ void collect_wav_bytes( const char* message, size_t length )
 #pragma region MQTT stuff
 
 
+/*
+    Rhasspy will also send the following messages:
+
+    When wakeword has been detected
+        topic = hermes/asr/startListening
+        payload = {"siteId": "raspi17", ... more stuff ... }        
+
+    When command has been recognized
+        topic = hermes/nlu/intentParsed
+        payload = 
+            {
+            "input": "turn OFF N115_Proxy", 
+            "intent": {
+                "intentName": "switch", 
+                ... more stuff ...
+            }, 
+            "siteId": "raspi17", 
+            ... more stuff ... 
+            "slots": [
+                {
+                    "entity": "state", 
+                    "value": {"kind": "Unknown", "value": "OFF"}, 
+                    ... more stuff ...
+                    "rawValue": "off", 
+                    ... more stuff ...
+                }, 
+                {
+                    "entity": "oh_items", 
+                    "value": {"kind": "Unknown", "value": "N115_Proxy"}, 
+                    ... more stuff ...
+                    "rawValue": "right hallway floorlight", 
+                    ... more stuff ...                
+                }
+            ], 
+            ... more stuff ...
+            }
+
+    When timeout has occured
+        topic = 
+        payload = {"input": "", "siteId": "raspi17", ... more stuff ... }
+
+    When WAV playback has finished, the *satellite* publishes
+        topic = hermes/audioServer/_siteId_/playFinished
+        payload = 
+            {
+                "id": "the-subtopic-name-from-the-playBytes-command", 
+                "sessionId": "the-subtopic-name-from-the-playBytes-command"}
+            }
+*/
+
 /// Format of MQTT message, subset of what Rhasspy would produce
 // 1st arg is hostname, 2nd is value, 3rd is itemname, 4th is label, 5th is raw text
-const char* mqtt_format = R"rawliteral({
+const char* hermes_intent = R"rawliteral({
  "siteId": "%s", 
  "slots": [
   {"entity": "state","value":{"value":"%s"}}, 
@@ -1082,6 +1142,31 @@ const char* mqtt_format = R"rawliteral({
  ], 
  "rawInput": "%s", 
 })rawliteral";
+
+/// MQTT message "wakeword detected", subset of what Rhasspy would produce
+// 1st arg is hostname
+const char* hermes_wakeword = R"rawliteral({"siteId": "%s"})rawliteral";
+#define TOPIC_WAKEWORD_DETECTED "hermes/asr/startListening"
+
+/// MQTT message "timeout occurred", subset of what Rhasspy would produce
+// 1st arg is hostname
+const char* hermes_timeout = R"rawliteral({"siteId": "%s"})rawliteral";
+#define TOPIC_TIMEOUT_OCCURRED "hermes/nlu/intentNotRecognized"
+
+/// MQTT message "playback finished"
+const char* hermes_playFinished = R"rawliteral({"id": "%s", "sessionId": "%s"})rawliteral";
+#define TOPIC_PLAYFINISHED "hermes/audioServer/${HOSTNAME}/playFinished"
+
+
+void publishFinished()
+{
+    if (sessionId.length() > 0) {
+        const char* id = sessionId.c_str();
+        snprintf(msgbuf,sizeof(msgbuf),hermes_playFinished,id,id);
+        sessionId = "";
+        mqttClient.publish(TOPIC_PLAYFINISHED,NULL,msgbuf);
+    }
+}
 
 
 /**
@@ -1097,7 +1182,7 @@ void publish_command( int id )
     } else {
         constexpr size_t MSG_BUFLEN = 500;
         char* msg = (char*) malloc(MSG_BUFLEN);
-        snprintf( msg, MSG_BUFLEN, mqtt_format,
+        snprintf( msg, MSG_BUFLEN, hermes_intent,
             WiFi.getHostname(), 
             pinfo->value,
             pinfo->itemname,
@@ -1141,6 +1226,7 @@ void onReceive(
     }
     if (message && *message) {
         log_i("MQTT received topic '" ANSI_BLUE "%s" ANSI_RESET "'", topic );
+        sessionId = topic;
         pcm_wav_header_t* pWAV = (pcm_wav_header_t*) message;
         unsigned ms = 1000u * pWAV->data_chunk.subchunk_size / pWAV->fmt_chunk.byte_rate;
         log_i("receiving WAV: %u bytes, %d Hz, %d bits, %d channels (%u ms)", 
@@ -1183,6 +1269,50 @@ bool initMQTT()
 
 #pragma endregion
 //==============================================================================
+#pragma region Download from HTTP server
+
+
+bool download_from_HTTP( const String& url, String& content, String& modified)
+{
+    String s;
+    HTTPClient httpClient;
+    httpClient.begin( url );
+    const char* headerNames[] = { "Last-Modified" };
+    httpClient.collectHeaders(headerNames,1);
+    int res = httpClient.GET();
+    if (res==200) {
+        content = httpClient.getString();
+        modified = httpClient.header("Last-Modified");
+        log_i("downloaded \n'" ANSI_BLUE "%s" ANSI_RESET "' (%s)", url.c_str(), modified.c_str() );
+        return true;
+    } else {
+        log_e(ANSI_RED "failed to download \n'" ANSI_BLUE "%s" ANSI_RESET "' (%s)", url.c_str(), modified.c_str() );        
+    }
+    return false;
+}
+
+
+bool download_and_store( const String& baseURL, const String& filename, String& content, String& modified )
+{
+    if (download_from_HTTP( baseURL+filename, content, modified)) {
+        File f = LittleFS.open( ("/"+filename).c_str(), "w");
+        if (f) {
+            f.print(content);
+            f.close();
+            log_i("Wrote '" ANSI_BLUE "%s" ANSI_RESET "' to FFS", filename.c_str() );
+            return true;
+        } else {
+            log_e(ANSI_RED "failed to write '%s' to flash" ANSI_RESET, filename.c_str() );
+            return true;
+        }
+    } else {
+        return false;
+    }
+}
+
+
+#pragma endregion
+//==============================================================================
 #pragma region ESP-SR
 
 
@@ -1215,11 +1345,12 @@ static void print_commands()
  */
 bool load_sr_commands()
 {
-    const char* CSV_COMMANDS_LOCAL = "/littlefs/oh_sr_commands.csv";
+    //const char* CSV_COMMANDS_LOCAL = "/littlefs/oh_sr_commands.csv";
     String csv;
 
 // try to read CSV from HTTP server
-
+    #define CSV_NAME "oh_sr_commands.csv"
+    /*
     HTTPClient httpClient;
     httpClient.begin( CSV_COMMANDS_URL );
     const char* headerNames[] = { "Last-Modified" };
@@ -1231,29 +1362,33 @@ bool load_sr_commands()
     } else {
         log_e(ANSI_BRIGHT_RED "HTTP error %d" ANSI_RESET,res);
     }
-
     if (csv.length() > 0) {
+    */
+    if (download_and_store(HTTP_BASE_URL,CSV_NAME,csv,CSV_lastModified)) {
         // got CSV file from HTTP server
-        log_i(GREEN_OK "Read SR commands from\n '" ANSI_BLUE "%s" ANSI_RESET "' (%s)",
-            CSV_COMMANDS_URL,
-            CSV_lastModified.c_str()
-        );
+        log_i(GREEN_OK "Read SR commands from server" );
     } else {
         log_w( ANSI_RED "can't download commands file %s" ANSI_RESET, 
-            CSV_COMMANDS_URL );
+            HTTP_BASE_URL CSV_NAME );
         // try to read from flash
-        File fp = LittleFS.open(CSV_COMMANDS_LOCAL,"r");
+        File fp = LittleFS.open("/" CSV_NAME,"r");
         if (!fp) {
             log_e(ANSI_RED "can't read commands file from FFS" ANSI_RESET);
             return false;
         }
         csv = fp.readString();
-        log_i(GREEN_OK "Read SR commands from '" ANSI_BLUE "%s" ANSI_RESET "'",
-            CSV_COMMANDS_LOCAL );
+        log_i(GREEN_OK "Read SR commands from FFS" );
     }
     srCommands.parse_csv(csv.c_str());
     print_commands();
     return true;
+}
+
+
+void updateCommands()
+{
+    if (load_sr_commands())
+        srCommands.fill();
 }
 
 
@@ -1476,6 +1611,9 @@ static const char *htmlContent PROGMEM = R"rawliteral(
 
 String get_index_html_from_server()
 {
+    String s;
+    download_and_store( HTTP_BASE_URL, "index.html", s, HTML_lastModified );
+    /*
     HTTPClient httpClient;
     String s("");
     httpClient.begin( "http://file-server/ota/index.html" );
@@ -1484,6 +1622,7 @@ String get_index_html_from_server()
         s = httpClient.getString();
         log_i("read index.html %u bytes",s.length());
     }
+    */
     return s;
 }
 

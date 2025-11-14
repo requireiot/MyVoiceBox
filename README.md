@@ -1,4 +1,4 @@
-# Voice satellite works with OpenHAB and Rhasspy
+# On-device voice control for OpenHAB
 ----
 - [Objective](#objective)
 - [Key features](#key-features)
@@ -21,45 +21,54 @@
 - [Insights](#insights)
   - [Using Espressif speech recognition in an Arduino project](#using-espressif-speech-recognition-in-an-arduino-project)
   - [Acoustic "debugging"](#acoustic-debugging)
+  - [How Rhasspy communicates with satellites](#how-rhasspy-communicates-with-satellites)
 - [Alternatives](#alternatives)
 - [References](#references)
 - [License](#license)
 
 ## Objective
 
-I wanted a few small units for speech-to-text voice recognition and text-to-speech voice output for my home automation environment, which includes OpenHAB and Rhasspy.
+I wanted a few small units for speech-to-text (voice recognition) and text-to-speech (voice output) for my home automation environment, which includes OpenHAB and Rhasspy.
 
-Before, I have used Rhasspy satellites built with a Raspberry Pi and a small speaker, but now I wanted something simpler and more compact, and with the voice recognition happening in the unit itself, without streaming audio to a server. 
+Previously, I have used Rhasspy satellites built with a Raspberry Pi and a small speaker (described [here](https://requireiot.com/rhasspy-satellite-with-raspberry-pi/)), but now I wanted something simpler and more compact, and with the voice recognition happening in the satellite device itself, without streaming audio to a server. 
 
 Espressif offers a ready-made speech recognition component for their ESP32-S3 processors called `esp-sr`, which can also be used in an Arduino project ... sort of, see below for the nasty details. 
-* the *advantage* of using `esp-sr` over a Raspberry Pi based satellite is that the speech recognition happens on the local processor, so there is no need to stream raw audio over WiFi to a central Rhasspy server.
-* a *disadvantage* of using `esp-sr` versus Rhasspy is that it can only detect fixed text, like "*turn on the lamp*", but not text with variable numbers, like "*dim the lamp to 50 percent*" .
-* another *disadvantage* of `esp-sr` versus Rhasspy is that it only does speech-to-text (voice recognition) and not text-to-speech (voice synthesis) ... unless you understand Mandarin.
+
+The *advantages* of using `esp-sr` over a Raspberry Pi based satellite are 
+* the speech recognition happens on the local processor, so there is no need to stream raw audio over WiFi to a central Rhasspy server.
+* it includes some advanced signal processing, like noise reduction and blind source separation when using two microphones.
+
+The *disadvantages* of using `esp-sr` versus Rhasspy are
+* it can only detect fixed text, like "*turn on the lamp*", but not text with variable numbers, like "*dim the lamp to 50 percent*" -- not an issue for me, in most use cases.
+* it only does speech-to-text (voice recognition) and not text-to-speech (voice synthesis) ... unless you understand Chinese -- you have to use a separate service for that, like Rhasspy or a standalone TTS service.
+* it only supports English and Chinese, whereare Rhasspy can be configured for many different languages -- I'm ok with English, but YMMV.
 
 The plan was to package the ESP32-S3 module with a small speaker, and write software that integrates with my existing home automation environment.
 
 ## Key features
 
-- a small device based on an ESP32-S3, total cost of materials ca. €20
-- self-contained speech recognition in the unit, no audio streaming to a server
-- automatic configuration for voice-controlled items defined in OpenHAB 
+- **low cost**:a small device based on an ESP32-S3, total cost of materials ca. €20
+- **privacy**: self-contained speech recognition in the device, no audio streaming to a server
+- **dynamic**: automatic configuration for voice-controlled items defined in OpenHAB 
 
 ## Bird's eye view of the solution
 
-* a Python script occasionally running on a server queries OpenHAB for all voice-controlled items, builds phrases such as "*turn on kitchen lamp*" and "*turn off kitchen lamp*" , converts them to phonemes to be fed to the `esp-sr` library, and stores all information in a file on a server. 
+* a Python script occasionally runs on a server, queries OpenHAB for all voice-controlled items, builds phrases such as "*turn on kitchen lamp*" and "*turn off kitchen lamp*", converts them to phonemes to be fed to the `esp-sr` library, and stores all information in a file on a server. 
 * a small ESP32-S3 module running my software and the Espressif `esp-sr` speech recognition library retrieves the phrases file from the server, initializes the library, and then listens to voice commands.
-* when the ESP32-S3 module detects a voice command, it publishes a message to MQTT, in essentially the same format that a Rhasspy satellite would produce. Therefore, I only need one OpenHAB rule to deal with commands from the new ESP32-S3 module, or an existing Rhasspy satellite.
+* when the ESP32-S3 module detects a voice command, it publishes a message to MQTT, in essentially the same format that a Rhasspy satellite would produce. Therefore, I only need *one* OpenHAB rule to deal with commands from the new ESP32-S3 module, or an existing Rhasspy satellite.
 * for voice synthesis, I use the Rhasspy text-to-speech engine, the ESP32-S3 module just receives a WAV file from Rhasspy (via MQTT) and plays that on its speaker.
 
 ## Hardware
 
+<img src="pictures/with-speaker.jpg" alt="system view" width="400" align="right">
+
 I developed this project using a cheap ESP32-S3 dev module from Aliexpress, a clone of the Espressif ESP32-S3-DevKitC1-N16R6. This has 16MB flash, 8 MB PSRAM, and a Neopixel-esque RGB LED on board.
 
-A MAX98357A I2S digital amplifier module is connected to I2S interface #0 and drives the speaker
+A MAX98357A I2S digital amplifier module is connected to I2S interface #0 and drives the speaker.
 
 Two INMP441 I2S digital microphones module are connected to I2S interface #1.
 
-An analog RGB LED serves as a status indicator: waiting for wakeword, recognized  wakeword and waiting for command, recognized command, or timeout.
+An analog RGB LED serves as a status indicator: "waiting for wakeword", "recognized wakeword and waiting for command", "recognized command", or "timeout".
 
 ## Build instructions
 
@@ -67,14 +76,17 @@ An analog RGB LED serves as a status indicator: waiting for wakeword, recognized
 
 You will need
 * a working installation of **OpenHAB**, to receive and interpret the commands recognized by MyVoiceBox. I currently use OpenHAB 4.1.1, running under Debian on a virtual x86 machine.
-* a working installation of **Rhasspy**, configured for a TTS engine of your choice. I use Rhasspy 2.5.11, running under Debian on a virtual x86 machine, withe *Larynx* test-to-speech engine and the *blizzard_lessac* voice.
+* a working installation of **Rhasspy**, configured for a TTS engine of your choice. I use Rhasspy 2.5.11, running under Debian on a virtual x86 machine, with the *Larynx* test-to-speech engine and the *blizzard_lessac* voice.
 * an **HTTP** server that can serve files to MyVoiceBox. I use Apache 2.4.65 running under Debian on a virtual x86 machine.
 
 ### Hardware
 
-<img src="pictures/D-top.jpg" alt="top view" width="400"> <img src="pictures/D-bottom.jpg" alt="bottom view" width="400">
+<img src="pictures/D-top.jpg" alt="top view" width="400"> <img src="pictures/D-bottom.jpg" alt="bottom view" width="400" align="right">
 
-Follow the [schematic](hardware/MyVoiceBox.pdf) to build the hardware. For production units, I used a "bare" ESP32-S3-WROOM-1 N16R8 on a prototype board that has a footprint for an ESP32 module ... the pinout is similar enough so I could place the ESP32-**S3** module on the footprint intended for a "plain" ESP32. Ignore the labels on the board, the pinout of an ESP32-S3 is different from an ESP, except the GND, 3v3, TxD and RxD signals, which are on the same pins for both modules.
+Follow the [schematic](hardware/MyVoiceBox.pdf) to build the hardware. For production units, I used a "bare" ESP32-S3-WROOM-1 N16R8 on a prototype board that has a footprint for an ESP32 module ... the pinout is similar enough so I could place the ESP32-**S3** module on the footprint intended for a "plain" ESP32. Ignore the labels on the board, the pinout of an ESP32-S3 is different from an ESP, except the GND, 3v3, TxD and RxD signals, which are on the same pins for both modules. 
+
+<img src="pictures/protoboard.jpg" alt="protoboard" width="150" align="right">
+Put a piece of insulating tape over the pin in the bottom left corner of the protoboard footprint -- this is GND on the ESP32, but a stzrapping pin signal on the ESP32-S3.
 
 For a speaker, I use half of a pair of "*Amazon Basics Stereo 2.0 Speakers for PC or Laptop*". They are cheap (typically under €20 per pair), and the sound quality is quite good, for this type of application.
 
@@ -83,25 +95,26 @@ For a speaker, I use half of a pair of "*Amazon Basics Stereo 2.0 Speakers for P
 I used a 100x60x25mm plastic box for the project. Here is how I placed the microphones:
 - solder the pin headers to the INMP441 microphone module such that the tip of the pins are flush with the surface of the module PCB on the side away from the components.
 - place the microphones on a piece of perf board, with the microphone holes ca. 5cm apart
-- drill two 2mm holes in the side of the plastic box, with a distance in between that is the distance between the microphone holes
-- place a piece of thick (1mm) double-sided sticky tape over each microphone module, and cut out a small hole over each microphone hole
-- align the perf-board and microphones assembly over the holes in the platic box, and glue it to the plactic box
+<img src="pictures/mic-assembly.jpg" alt="mic assembly" width="250" align="right">- drill two 2mm holes in the side of the plastic box, with a distance in between that is the distance between the microphone holes
+- place a piece of thick (1mm) double-sided sticky tape over each microphone module, and cut out a small hole over each microphone hole 
+<img src="pictures/mics-in-box.jpg" alt="mic assembly" width="250" align="right">
+- align the perf-board and microphones assembly over the holes in the plastic box, and glue it to the plactic box
 
 ### Firmware
 
 1. Clone the Github repository.
-2. Copy `main/myauth_sample.h`to `main/myauth.h` and edit that to define your WiFi SSID and password, as well as the names of your servers in your home environment.
-3. In folder `tools/`, edit `oh_sr_commands.py` to set the name of your OpenHAB server, then run `python oh_sr_commands.py`. This creates file `oh_sr_commands.csv`, copy that to your HTTP server. This is where the MyVoiceBox firmware will get its information about voice-related OpenHAB items. 
+2. Copy `main/myauth_sample.h`to `main/myauth.h` and edit that to define your WiFi SSID and password, as well as the names of the servers in your home environment.
+3. In folder `tools/`, edit `oh_sr_commands.py` to set the name of your OpenHAB server, then run `python oh_sr_commands.py`. This creates file `data/oh_sr_commands.csv`, copy that to your HTTP server. This is where the MyVoiceBox firmware will get its information about voice-related OpenHAB items. 
 4. Build firmware and upload to your ESP32-S3 module, over USB.
 5. Future updates can also be done over-the-air. Edit `ota-update.bat` to set the IP address of your device, then run it.
 
 ### OpenHAB integration
 
 * for all OpenHAB *items* to be voice controlled, the item label is the name used in the voice command
-* all OpenHAB *items* that can be **switched** on and off are assigned to group `gVA`. This creates voice commands "*turn on `name`*" and "*turn off `name`*".
-* all OpenHAB *items* that can be **dimmed** are assigned to group `gVD`. This creates voice commands "*dim `name` to low|medium|high|off*".
-* all OpenHAB *items* that represent lighting **scenes** are assigned to group `gVS`. This create voice commands "*let's `name`".
-* all OpenHAB items that can be asked about are assigned to group `gVQ`. This creates commands "*what is the `name`*"
+* all OpenHAB *items* that can be **switched** on and off are assigned to group `gVA`. This creates voice commands "*turn on `label`*" and "*turn off `label`*".
+* all OpenHAB *items* that can be **dimmed** are assigned to group `gVD`. This creates voice commands "*dim `label` to low|medium|high|off*".
+* all OpenHAB *items* that represent lighting **scenes** are assigned to group `gVS`. This create voice commands "*let's `scene label`".
+* all OpenHAB items that can be asked about are assigned to group `gVQ`. This creates commands "*what is the `label`*"
 
 So my OpenHAB items definition file `/etc/openhab/items/voice.items` file might look like this
 ```
@@ -121,45 +134,7 @@ Since we use Rhasspy to generate the audio signal for spoken voice messages, the
 ```
 Satellite siteIds: raspi13,raspi14,esp32s3-56BCF4,esp32s3-56BCFC
 ```
-in order for "real" Rhasspy satellites to generate the same MQTT messages about recognized voice comands as the MyVoiceBox units, my `sentences.ini`, which can be edited at `http://some-server:12101/sentences` looks like this:
-```
-[switch]
-(turn | switch) (on | off){state!upper} [the] ($oh_items,gVA){lightName} [please] 
-
-[query]
-what is the ($oh_items,gVQ){topic!lower}
-
-[scene]
-lets ($oh_items,gVS){topic}
-
-[dim_cat]
-set ($oh_items,gVD){itemName} to (low | medium | high){state}
-```
-
-This relies on a Python script at  which queries OpenHAB and assembles a list of item names assigned to one of the voice-related groups. The script is stored in `~/.config/rhasspy/profiles/en/slot_programs/oh_item` on the machine running Rhasspy and contains
-``` Python
-#!/usr/bin/python3
-from requests import get
-import sys,os
-if (len(sys.argv)<2):
-    print(f'No group name specified', file=sys.stderr)
-    exit(1)
-groupname = sys.argv[1]
-print(f'Create Rhasspy slots from OpenHAB items in group {groupname} ...', file=sys.stderr)
-# set OpenHAB REST API url to get a list of all items
-url = "http://ha-server:8080/rest/items?recursive=false"
-headers = {
-    "content-type": "application/json",
-}
-response = get(url, headers=headers)
-items = response.json()
-for item in items:
-    name = item['name']
-    groups = item['groupNames']
-    if groupname in groups:
-        friendly_name = item['label']
-        print(f"({friendly_name}):{name}")
-```
+For more details about my integration of "real" Rhasspy satellites with OpenHAB, see my [blog](https://requireiot.com/rhasspy-with-openhab/).
 
 ## Web interface
 
@@ -183,7 +158,7 @@ The bottom right panel gives some information about the current version of the f
 
 ### Microphone
 
-I use an INMP441 digital microphone, with the following characteristics:
+I use INMP441 digital microphones, with the following characteristics:
 - sensitivity (per datasheet): -26 dBFS for 94 dB SPL, i.e. 120 dB SPL at full scale
 - 24 bit data size, sent as 32 bit words
 
@@ -224,16 +199,24 @@ In the ESP-IDF project, one of several wakewords can be selected through the pro
 
 I found it really helpful to be able to listen to the audio signal picked up by the microphone and sent to the speech recognition engine. There are two features, which can be enabled via the web interface:
 - record the audio signal while a command is being spoken, and save it to a WAV file on an external server
-- record the audio signal while a command is being spoken, and replay it through teh speaker immediately afterwards
+- record the audio signal while a command is being spoken, and replay it through the speaker immediately afterwards
 
-These help to address issues like: is there too much echo from the room? is the signal contamiated with electrical noise?
+These help to address issues like: is there too much echo from the room? is the signal contaminated with electrical noise?
+
+### How Rhasspy communicates with satellites
+
+The MyVoiceBox device simulates a Rhasspy satellite to the extent necessary for working with my OpenHAB installation, so I had to do a bit of reseearch on how Rhasspy communicates with its satellites.
+
+To create audio output on the satellite, Rhasspy publishes am MQTT message to `hermes/audioServer/<siteId>/playBytes/<sessionId>`. A message to my satellite named `esp32s3-56BCF4` would go to a topic like `hermes/audioServer/esp32s3-56BCF4/playBytes/226f9057-1360-4927-a786-8fcf8d6a997b`. The payload of the message is the complete WAV file to be played.
+
+When the satellite has finished playing back the WAV file, it will publish a message to `hermes/audioServer/<siteId>/playFinished`. The payload is a JSON formatted string that contains the sessionId from the previous message. So my satellite would respond to the example message above with a payload of `{"id": "226f9057-1360-4927-a786-8fcf8d6a997b", "sessionId": "226f9057-1360-4927-a786-8fcf8d6a997b"}`.
 
 ## Alternatives
 
-Possible alternatives to this project, with similar objectives and features are 
+I am aware of the following possible alternatives to my project, with similar objectives and features:
 
-* a **Raspberry Pi based Rhasspy satellite**, as described in my [blog post](https://requireiot.com/rhasspy-satellite-with-raspberry-pi/). It works, but requires more power, and audio is streamed over WiFi for speech recognition at a central in-home server.
-* the **[ESP32 Rhasspy Satellite](https://github.com/Romkabouter/ESP32-Rhasspy-Satellite)** project, . It uses a "regular" ESP32, I built one, see my [blog post](https://requireiot.com/basic-satellite/). I used it for output only, because for voice recognition, it requires constant streaming of the audio signal to a central server. Even the wakeword detection is done on the server.
+* a **Raspberry Pi based Rhasspy satellite**, as described [here](https://requireiot.com/rhasspy-satellite-with-raspberry-pi/). It works, but requires more power, and audio is streamed over WiFi for speech recognition at a central in-home server.
+* the **[ESP32 Rhasspy Satellite](https://github.com/Romkabouter/ESP32-Rhasspy-Satellite)** project. It uses a "regular" ESP32. I built one, see my [blog post](https://requireiot.com/basic-satellite/). I used it for output only, because for voice recognition, it requires constant streaming of the audio signal to a central server. Even the wakeword detection is done on the server.
 * the **[Willow](https://heywillow.io/)** project, which also runs on an ESP32-S3 and can use the speech recognition library provided by Espressif. It is a sophisticated open-source project, but its focus appears to be on working with a central in-home server, which they call the "inference server". Also, it doesn't have voice output, as far as I can tell. The required hardware is from a small list of devices sold by Espressif, which they call "cheap" at $50 ... still more than the ~ €20 hardware cost of MyVoiceBox.
 
 ## References
@@ -243,4 +226,4 @@ Possible alternatives to this project, with similar objectives and features are
 
 ## License
 
-The code and schematics I created for this project are under an MIT license, see [LICENSE.txt](LICENSE.txt). Folder `components/` contains libraries cloned from other repositries, which may be under a different license, see each folder for more details.
+The code and schematics I created for this project are under an MIT license, see [LICENSE.txt](LICENSE.txt). Folder `components/` contains libraries cloned from other repositories, which may be under a different license, see each folder for more details.
