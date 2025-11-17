@@ -1,4 +1,4 @@
-# On-device voice control for OpenHAB
+# Cloud-free voice control for OpenHAB
 ----
 - [Objective](#objective)
 - [Key features](#key-features)
@@ -28,9 +28,9 @@
 
 ## Objective
 
-I wanted a few small units for speech-to-text (voice recognition) and text-to-speech (voice output) for my home automation environment, which includes OpenHAB and Rhasspy.
+I wanted a few small units for speech-to-text (voice recognition) and text-to-speech (voice output) for my home automation environment, which includes OpenHAB and Rhasspy (details [here](https://requireiot.com/listen-voice-interaction-with-home-automation/)).
 
-Previously, I have used Rhasspy satellites built with a Raspberry Pi and a small speaker (described [here](https://requireiot.com/rhasspy-satellite-with-raspberry-pi/)), but now I wanted something simpler and more compact, and with the voice recognition happening in the satellite device itself, without streaming audio to a server. 
+Previously, I have used [Rhasspy](https://rhasspy.readthedocs.io/en/latest/) satellites built with a Raspberry Pi and a small speaker (described [here](https://requireiot.com/rhasspy-satellite-with-raspberry-pi/)), but now I wanted something simpler and more compact, and with the voice recognition happening in the satellite device itself, without streaming audio to a server, not even to an in-house server. 
 
 Espressif offers a ready-made speech recognition component for their ESP32-S3 processors called `esp-sr`, which can also be used in an Arduino project ... sort of, see below for the nasty details. 
 
