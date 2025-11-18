@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1916 2025-11-10 11:02:02Z  $
+ * This Revision: $Id: main.cpp 1929 2025-11-18 18:34:38Z  $
  */
 
 /*
@@ -62,7 +62,7 @@
 #define DebugSerial Serial0
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1916 2025-11-10 11:02:02Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1929 2025-11-18 18:34:38Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -1350,24 +1350,14 @@ bool load_sr_commands()
 
 // try to read CSV from HTTP server
     #define CSV_NAME "oh_sr_commands.csv"
-    /*
-    HTTPClient httpClient;
-    httpClient.begin( CSV_COMMANDS_URL );
-    const char* headerNames[] = { "Last-Modified" };
-    httpClient.collectHeaders(headerNames,1);
-    int res = httpClient.GET();
-    if (res==200) {
-        csv = httpClient.getString();
-        CSV_lastModified = httpClient.header("Last-Modified");
-    } else {
-        log_e(ANSI_BRIGHT_RED "HTTP error %d" ANSI_RESET,res);
-    }
-    if (csv.length() > 0) {
-    */
+// Multinet7 defines commands at build time, no need to download latest version from HTTP
+//#if !defined(CONFIG_SR_MN_EN_MULTINET7_QUANT)
     if (download_and_store(HTTP_BASE_URL,CSV_NAME,csv,CSV_lastModified)) {
         // got CSV file from HTTP server
         log_i(GREEN_OK "Read SR commands from server" );
-    } else {
+    } else 
+//#endif
+    {
         log_w( ANSI_RED "can't download commands file %s" ANSI_RESET, 
             HTTP_BASE_URL CSV_NAME );
         // try to read from flash
@@ -1479,20 +1469,12 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
  */
 void init_SR()
 {
-    sr_cmd_t* sr_commands = NULL;
-
-    //if (!load_sr_commands()) return;
-#ifdef USE_SR_COMMANDS
-    sr_commands = build_sr_commands();
-    if (NULL==sr_commands) return;
-#endif
-
     ESP_SR.onEvent(onSrEvent);
     
     bool ok = ESP_SR.begin( 
                 rx_i2s, 
-                sr_commands, 
-                sr_commands ? srCommands.count() : 0, 
+                NULL, 
+                0, 
                 SR_CHANNELS, 
                 SR_MODE_WAKEWORD,
                 INPUT_FORMAT 
@@ -1502,14 +1484,10 @@ void init_SR()
     else
         log_e( ANSI_BRIGHT_RED "ESP_SR.begin() failed!" ANSI_RESET);
 
-#ifdef USE_SR_COMMANDS
-    free(sr_commands);
-#else
     if (srCommands.fill())
         log_i("Sent %u commands to ESP-SR", srCommands.count() );
     else
         log_e("Error in fill_sr_commands_esp()");
-#endif
     setState(stIdle);
 }
 

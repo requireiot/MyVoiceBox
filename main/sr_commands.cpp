@@ -5,7 +5,7 @@
  * @date        2025-10-15
  * tabsize  4
  * 
- * This Revision: $Id: sr_commands.cpp 1913 2025-11-06 13:02:38Z  $
+ * This Revision: $Id: sr_commands.cpp 1929 2025-11-18 18:34:38Z  $
  */
 
 /*
@@ -170,20 +170,29 @@ bool SR_Commands::parse_csv( const char* csv )
 bool SR_Commands::fill()
 {
 // if Multinet7 is selected, then we rely on specifying commands at compile time
-#if defined(CONFIG_SR_MN_EN_MULTINET7_QUANT)
-    return true;
-#endif
+//#if defined(CONFIG_SR_MN_EN_MULTINET7_QUANT)
+//    return true;
+//#endif
 
     bool ok;
+    esp_err_t ret;
     ok = (ESP_OK==esp_mn_commands_clear());
     int i; command_info_t* pinfo;
     for (i=1, pinfo=_commands; i <= _n_commands; i++, pinfo++) {
-#if defined( CONFIG_SR_MN_EN_MULTINET7_QUANT) || defined(CONFIG_SR_MN_EN_MULTINET6_QUANT)
+#if defined( CONFIG_SR_MN_EN_MULTINET7_QUANT)
+        ret = esp_mn_commands_phoneme_add(i,pinfo->grapheme,pinfo->phoneme);
+        ok = ok && (ESP_OK==ret);
+        if (ret != ESP_OK) {
+            log_e("esp_mn_commands_phoneme_add(%d) returns %d",i,(int)ret);
+            break;
+        }
+#elif defined(CONFIG_SR_MN_EN_MULTINET6_QUANT)
         ok = ok && (ESP_OK==esp_mn_commands_add(i,pinfo->grapheme));
 #else
         ok = ok && (ESP_OK==esp_mn_commands_add(i,pinfo->phoneme));
 #endif
     }
+    log_i("defined %d commands",i-1);
     ok = ok && (NULL==esp_mn_commands_update());
     return ok;
 }

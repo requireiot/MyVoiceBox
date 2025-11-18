@@ -104,7 +104,7 @@ I used a 100x60x25mm plastic box for the project. Here is how I placed the micro
 
 1. Clone the Github repository.
 2. Copy `main/myauth_sample.h`to `main/myauth.h` and edit that to define your WiFi SSID and password, as well as the names of the servers in your home environment.
-3. In folder `tools/`, edit `oh_sr_commands.py` to set the name of your OpenHAB server, then run `python oh_sr_commands.py`. This creates file `data/oh_sr_commands.csv`, copy that to your HTTP server. This is where the MyVoiceBox firmware will get its information about voice-related OpenHAB items. 
+3. In folder `tools/`, edit `oh_sr_commands.py` to set the name of your OpenHAB server, then run `python oh_sr_commands.py`. This creates file `data/oh_sr_commands.csv`, copy that to your HTTP server. This is where the MyVoiceBox firmware will get its information about voice-related OpenHAB items. It also creates file `managed_componentsmanaged_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt', which is needed if you select Multinet7 as the speech recognition model
 4. Build firmware and upload to your ESP32-S3 module, over USB.
 5. Future updates can also be done over-the-air. Edit `ota-update.bat` to set the IP address of your device, then run it.
 

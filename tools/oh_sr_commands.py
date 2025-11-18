@@ -1,10 +1,11 @@
 #
 # oh_sr_commands.py --- query OpenHAB about items relevant for voice control,
-# and generate a CSV file that can be downloaded by the ESP32-S3 module
-# for use with ESP-SR and Multinet5
+# and generate 
+# - a CSV file that can be downloaded by the ESP32-S3 module
+# - a TXT file needed at build time when using Multinet7
 #
 
-# This Revision: $Id: oh_sr_commands.py 1907 2025-11-02 19:28:56Z  $
+# This Revision: $Id: oh_sr_commands.py 1929 2025-11-18 18:34:38Z  $
 
 #
 #   Copyright (C) 2025 Bernd Waldmann
@@ -16,7 +17,7 @@
 #   SPDX-License-Identifier: MPL-2.0
 #
 
-# pip3 install g2p_en
+# pip3 install g2p_en num2words
 from g2p_en import G2p
 import argparse
 from requests import get
@@ -106,13 +107,15 @@ alphabet = {
 }
 
 iCmd = 0
+out_csv = ""
+out_txt = ""
 g2p = G2p()
 
 
-def print_command( phrase:str, action:str, itemname:str, label:str, value:str ) -> str:
+def print_command( phrase:str, action:str, itemname:str, label:str, value:str ):
     """ create one line with information about one command, in a format expected
     by the CSV parser on the ESP32-S3 """
-    global iCmd, alphabet
+    global iCmd, alphabet, out_txt, out_csv
     iCmd += 1
     if (iCmd > MAX_COMMANDS): 
         print("Reached maximum number of commands",file=sys.stderr)
@@ -131,21 +134,21 @@ def print_command( phrase:str, action:str, itemname:str, label:str, value:str ) 
         else:
             phoneme += alphabet[char]
     # grapheme,phoneme,action,itemname,label,value
-    out = f'"{phrase}","{phoneme}","{action}","{itemname}","{label}","{value}"\n'
-    return out
+    out_csv += f'"{phrase}","{phoneme}","{action}","{itemname}","{label}","{value}"\n'
+    out_txt += f"{iCmd},{phrase.upper()},{phoneme}\n"
 
 
-
-def english_g2p() -> str:
+def english_g2p():
     """ Query OpenHAB for a list of items relevant for voice control, and 
     generate a CSV-formatted string with information about all commands,
     in the format expected by the CSV parser on the ESP32-S3"""
-
+    global out_txt, out_csv
+	
     headers = { "content-type": "application/json", }
     response = get(OPENHAB_URL, headers=headers)
     items = response.json()
 
-    # Define re to remove anything but alphabet and spaces 
+    # Define re to remove anything but alphabet and spaces - multinet doesn't support them and too lazy to make them words
     pattern = r'[^A-Za-z ]'
 
     out = "grapheme,phoneme,action,itemname,label,value\n"
@@ -170,21 +173,22 @@ def english_g2p() -> str:
             for verb in ['turn','switch']:
                 for state in ['on','off']:
                     phrase = f'{verb} {state} {friendly_name}'
-                    out += print_command( phrase,"switch",itemname,friendly_name,state)
+                    print_command( phrase,"switch",itemname,friendly_name,state)
 
         # group name gVQ marks items that afford a 'query' intent, 
         # i.e. can be asked about with a command like "what is `item label`""
         elif 'gVQ' in groups:
             friendly_name = item['label']
             phrase = f"what is the {friendly_name}"
-            out += print_command(phrase,"query",itemname,friendly_name,"")
+            print_command(phrase,"query",itemname,friendly_name,"")
 
         # group name gVS marks item thats afford a 'scene' intent, 
         # i.e. can be selected with a command like "let's `scene label`""
         elif 'gVS' in groups:
             friendly_name = item['label']
             phrase = f"lets {friendly_name}"
-            out += print_command(phrase,"scene",itemname,friendly_name,"")
+            print_command(phrase,"scene",itemname,friendly_name,"")
+            print(f"gVS: label='{friendly_name}'  name='{itemname}'",file=sys.stderr)
 
         # group name gVD marks items that afford a 'dim' intent, 
         # i.e. can be asked about with a command like "dim `item label` to off|low|medium|high"
@@ -193,16 +197,18 @@ def english_g2p() -> str:
         # transformation to 0% 10% 50% 100%
         elif 'gVD' in groups:
             friendly_name = item['label']
-            for verb in ["set","dim"]:
-                for cat in ["low","medium","high","off"]:
-                    out += print_command(f"{verb} {friendly_name} to {cat}","dim_cat",itemname,friendly_name,cat)
+            for cat in ["low","medium","high","off"]:
+                print_command(f"dim {friendly_name} to {cat}","dim",itemname,friendly_name,"{cat}")
 
     # for item in items
+    with open("../managed_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt","w") as f:
+        f.write(out_txt)
+
+    with open("../data/oh_sr_commands.csv","w") as f:
+        f.write(out_csv)
+
     print(f"----- {iCmd} commands, done",file=sys.stderr)
-    return out
 
 
 if __name__ == "__main__":
-    out = english_g2p()
-    with open("../data/oh_sr_commands.csv","w") as f:
-        f.write(out)
+    english_g2p()
