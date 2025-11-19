@@ -49,6 +49,11 @@
      <label for="savewave">Save voice to WAV</label>
 	 <input type="hidden" name="savewave" value="OFF"/>
     </p>
+    <p>
+     <input type="checkbox" name="rt_stats" value="ON" %RT_STATS% />
+     <label for="savewave">Show realtime statistics</label>
+	 <input type="hidden" name="rt_stats" value="OFF"/>
+    </p>
     <button type="submit">Save</button>
     </form>
   </fieldset>
@@ -62,7 +67,7 @@
   <fieldset>
     <legend><i>&nbsp;Version&nbsp;</i></legend>
     <p class="version"><b>Firmware:</b><br/>%VERSION%</p>
-	<p class="version"><b>HTML:</b><br/>$Id: index.html 1913 2025-11-06 13:02:38Z  $</p>
+	<p class="version"><b>HTML:</b><br/>$Id: index.html 1930 2025-11-19 13:43:46Z  $</p>
 	<p class="version"><b>Commands:</b><br/>%CSV_VERSION%</p>
 	<form action="/update"><button type="submit">Update</button></form>
   </fieldset>

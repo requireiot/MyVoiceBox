@@ -7,7 +7,6 @@
  */
 #include "sdkconfig.h"
 #include <esp_arduino_version.h>
-//#if CONFIG_IDF_TARGET_ESP32S3 && (CONFIG_USE_WAKENET || CONFIG_USE_MULTINET)
 #if (CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4) && (CONFIG_MODEL_IN_FLASH || CONFIG_MODEL_IN_SDCARD)
 
 
@@ -344,7 +343,7 @@ esp_err_t srx_start(
   sr_mode_t mode, 
   const char *input_format, 
   const sr_cmd_t sr_commands[], 
-  size_t cmd_number, 
+  size_t cmd_number,
   sr_event_cb cb, 
   void *cb_arg
 ) {
@@ -389,7 +388,7 @@ esp_err_t srx_start(
   log_d("load model_data '%s'", mn_name);
   g_sr_data->model_data = g_sr_data->multinet->create(mn_name, 5760);
 
-#if defined( CONFIG_SR_MN_EN_MULTINET7_QUANT)
+#if CONFIG_SR_MN_EN_MULTINET7_QUANT
 #else
   // Add commands
   esp_mn_commands_alloc(
@@ -409,7 +408,7 @@ esp_err_t srx_start(
       log_e("err cmd id:%d", err_id->phrases[i]->command_id);
     }
   }
-#endif
+#endif // if CONFIG_SR_MN_EN_MULTINET7_QUANT
   //Start tasks
   log_d("start tasks");
   ret_val = xTaskCreatePinnedToCore(&audio_feed_task, "SR Feed Task", 4 * 1024, NULL, 5, &g_sr_data->feed_task, 0);

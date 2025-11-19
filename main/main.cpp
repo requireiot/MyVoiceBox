@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1929 2025-11-18 18:34:38Z  $
+ * This Revision: $Id: main.cpp 1930 2025-11-19 13:43:46Z  $
  */
 
 /*
@@ -23,8 +23,8 @@
  * built with ESP-IDF and Arduino-as-a-component
  */
 
-#define USE_SRX             // use modified ESP_SR library
-//#define USE_SR_COMMANDS   // define SR commands in call to ESP_SR.begin(), not later
+//----- standard C and C++ headers
+#include <map>
 
 //----- Arduino and libraries
 #include <Arduino.h>
@@ -38,14 +38,9 @@
 #include <LittleFS.h>           // Apache license
 #include "wav_header.h"
 #include "esp_littlefs.h"
-#include <map>
 #include <ESP_I2S.h>
-#ifdef USE_SRX
  #include <ESP_SRx.h>
  #define ESP_SR ESP_SRx
-#else
- #include <ESP_SR.h>
-#endif
 #include "sdkconfig.h"
 
 //----- project-specific headers
@@ -62,7 +57,7 @@
 #define DebugSerial Serial0
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1929 2025-11-18 18:34:38Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1930 2025-11-19 13:43:46Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -150,7 +145,8 @@ const char VERSION[] =
 
 #define MQTT_PUB_BASE "hermes"
 
-//#define CSV_NAME "/oh_sr_commands.csv"
+#define STATS_TICKS         pdMS_TO_TICKS(1000)
+
 
 #pragma endregion
 //==============================================================================
@@ -248,6 +244,8 @@ AsyncWebServer server(80);
 String CSV_lastModified("FFS");
 String HTML_lastModified("FFS");
 
+bool opt_realtime_stats = false;
+
 struct stats_t {
     unsigned n_cmds_ok;
     unsigned n_cmds_err;
@@ -327,6 +325,10 @@ const std::map<const std::string, conv_t> config_mapper = {
     { "micatten", {
         []() { return String( config.gain_mic_play); },
         [](const AsyncWebParameter* wp) { config.gain_mic_play = wp->value().toInt(); }
+    }},
+    { "rt_stats", {
+        []() { return String( opt_realtime_stats ? "checked" : "" ); },
+        [](const AsyncWebParameter* wp) { opt_realtime_stats = wp->value().equals("ON"); }
     }},
     { "ncmdsok", {
         []() { return String( stats.n_cmds_ok ); },
@@ -445,7 +447,7 @@ bool i2s_tx_initialize()
 
 bool i2s_tx_set_sample_rate( unsigned sample_rate )
 {
-    log_i("Set I2S TX sample rate to %u Hz", sample_rate);
+    log_d("Set I2S TX sample rate to %u Hz", sample_rate);
     return tx_i2s.configureTX( sample_rate, i2s_TX_BITS, i2s_TX_SLOTMODE );
 }
 
@@ -888,13 +890,22 @@ void poll_Button()
 
 void printSRinfo( Print& serial )
 {
-    const char* wwname =
+    static const char* wwname =
 #if CONFIG_SR_WN_WN9_ALEXA
         "WN9 Alexa";
 #elif CONFIG_SR_WN_WN9_HIESP
         "WN9 HiESP";
 #else
         "unknown";
+#endif
+
+    static const char* mnname =
+#if CONFIG_SR_MN_EN_MULTINET7_QUANT
+        "MultiNet7";
+#elif CONFIG_SR_MN_EN_MULTINET6_QUANT
+        "MultiNet6";
+#else
+        "MultiNet5";
 #endif
 
     serial.printf(" I2S Audio: %d Hz, TX %d bits %s, RX %d/%d bits %s", 
@@ -905,7 +916,10 @@ void printSRinfo( Print& serial )
         i2s_RX_STEREO ? "stereo" : "mono"
         );
     serial.println();
-    serial.printf(" Wakeword: " ANSI_BOLD "%s" ANSI_RESET , wwname );
+    serial.printf(
+        " Wakeword: " ANSI_BOLD "%s" ANSI_RESET 
+        ", Model: " ANSI_BOLD "%s" ANSI_RESET , 
+        wwname, mnname );
     serial.println();
 }
 
@@ -1039,7 +1053,7 @@ void start_collecting( unsigned nbytes, unsigned sample_rate )
             nbytes );
         return;
     }
-    log_i("Allocated %u bytes for WAV buffer", nbytes );
+    log_d("Allocated %u bytes for WAV buffer", nbytes );
     wav_byte_ptr = (char*) wav.buf;
     wav.samplerate = sample_rate;
     isCollecting = true;
@@ -1345,28 +1359,23 @@ static void print_commands()
  */
 bool load_sr_commands()
 {
-    //const char* CSV_COMMANDS_LOCAL = "/littlefs/oh_sr_commands.csv";
+    #define CSV_NAME "oh_sr_commands.csv"
+
     String csv;
 
-// try to read CSV from HTTP server
-    #define CSV_NAME "oh_sr_commands.csv"
-// Multinet7 defines commands at build time, no need to download latest version from HTTP
-//#if !defined(CONFIG_SR_MN_EN_MULTINET7_QUANT)
+    // try to read CSV from HTTP server
     if (download_and_store(HTTP_BASE_URL,CSV_NAME,csv,CSV_lastModified)) {
-        // got CSV file from HTTP server
         log_i(GREEN_OK "Read SR commands from server" );
-    } else 
-//#endif
-    {
+    } else {
         log_w( ANSI_RED "can't download commands file %s" ANSI_RESET, 
             HTTP_BASE_URL CSV_NAME );
-        // try to read from flash
         File fp = LittleFS.open("/" CSV_NAME,"r");
         if (!fp) {
             log_e(ANSI_RED "can't read commands file from FFS" ANSI_RESET);
             return false;
         }
         csv = fp.readString();
+        fp.close();
         log_i(GREEN_OK "Read SR commands from FFS" );
     }
     srCommands.parse_csv(csv.c_str());
@@ -1375,6 +1384,10 @@ bool load_sr_commands()
 }
 
 
+/**
+ * @brief Reload commands list from server and send to esp-sr
+ * 
+ */
 void updateCommands()
 {
     if (load_sr_commands())
@@ -1389,7 +1402,6 @@ void updateCommands()
  */
 void reportCommand( int id )
 {
-//#if CONFIG_ARDUHAL_LOG_DEFAULT_LEVEL > 3
     const command_info_t* pinfo = srCommands[id];
     if (pinfo==NULL) {
         log_e("unknown command %d",id);
@@ -1407,12 +1419,11 @@ void reportCommand( int id )
             pinfo->value ? pinfo->value : "(none)"
         );
     }
-//#endif
 }
 
 
 /**
- * @brief Callback to handle events from the speech recognition machinery
+ * @brief Callback to handle events sent by the speech recognition engine
  * 
  * @param event 
  * @param command_id 
@@ -1421,17 +1432,17 @@ void reportCommand( int id )
 void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
   switch (event) {
     case SR_EVENT_WAKEWORD: 
-      log_i("WakeWord Detected!"); 
+      log_d("WakeWord Detected!"); 
       start_recording();
       start_playing(beep_wake);
       break;
     case SR_EVENT_WAKEWORD_CHANNEL:
-      log_i("WakeWord Channel %d Verified!", command_id);
+      log_d("WakeWord Channel %d Verified!", command_id);
       ESP_SR.setMode(SR_MODE_COMMAND);  // Switch to Command detection
       setState(stDetected);
       break;
     case SR_EVENT_TIMEOUT:
-      log_i("Timeout Detected!");
+      log_w(ANSI_RED "Timeout Detected!" ANSI_RESET); 
       stop_recording();
       stats.n_cmds_err++;
       start_playing(beep_error);
@@ -1439,7 +1450,7 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
       setState(stCommandError);
       break;
     case SR_EVENT_COMMAND:
-      log_i("Command %d Detected!", command_id);
+      log_d("Command %d Detected!", command_id);
       stop_recording();
       stats.n_cmds_ok++;
       reportCommand(command_id);
@@ -1449,7 +1460,7 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
       setState(stCommandOk);
       break;
     default: 
-      log_i("Unknown Event!");
+      log_w(ANSI_RED "Unknown Event!" ANSI_RESET);
       break;
   }
 }
@@ -1728,6 +1739,82 @@ void init_Webserver()
 
 #pragma endregion
 //==============================================================================
+#pragma region Real time statistics
+
+
+#define ARRAY_SIZE_OFFSET   5   //Increase this if print_real_time_stats returns ESP_ERR_INVALID_SIZE
+
+
+TaskStatus_t *start_array = NULL, *end_array = NULL;
+UBaseType_t start_array_size, end_array_size;
+uint32_t start_run_time, end_run_time;
+
+
+static void print_stats()
+{
+    //Calculate total_elapsed_time in units of run time stats clock period.
+    uint32_t total_elapsed_time = (end_run_time - start_run_time);
+    if (total_elapsed_time == 0) {
+        return;
+    }
+
+    printf("\n| %-20s | Run Time | Percentage\n","Task");
+    //Match each task in start_array to those in the end_array
+    for (int i = 0; i < start_array_size; i++) {
+        int k = -1;
+        for (int j = 0; j < end_array_size; j++) {
+            if (start_array[i].xHandle == end_array[j].xHandle) {
+                k = j;
+                break;
+            }
+        }
+        //Check if matching task found
+        if (k >= 0) {
+            uint32_t task_elapsed_time = end_array[k].ulRunTimeCounter - start_array[i].ulRunTimeCounter;
+            uint32_t percentage_time = (task_elapsed_time * 100UL) / (total_elapsed_time * portNUM_PROCESSORS);
+            printf("| %-20s | %8" PRIu32 " | %3" PRIu32 "%%\n", start_array[i].pcTaskName, task_elapsed_time, percentage_time);
+        }
+    }
+}
+
+
+static uint32_t fill_stats( TaskStatus_t** array, uint32_t* run_time )
+{
+    uint32_t array_size;
+    if (*array) free(*array);
+    array_size = uxTaskGetNumberOfTasks() + ARRAY_SIZE_OFFSET;
+    *array = (TaskStatus_t*) malloc(sizeof(TaskStatus_t) * array_size);
+    array_size = uxTaskGetSystemState(*array, array_size, run_time);
+    return array_size;
+}
+
+
+static void update_realtime_stats()
+{
+    if (start_array==NULL) {
+        start_array_size = fill_stats( &start_array, &start_run_time );
+        return;
+    }
+
+    end_array_size = fill_stats( &end_array, &end_run_time );
+    if (0==end_array_size) return;
+
+    if (start_array != NULL) {
+        // we have both valid start_array and end_array, let's print it
+        print_stats();
+        // now move end to start
+        free(start_array);
+        start_array = end_array;
+        end_array = NULL;
+        start_array_size = end_array_size;
+        end_array_size = 0;
+        start_run_time = end_run_time;
+    }
+}
+
+
+#pragma endregion
+//==============================================================================
 #pragma region Arduino standard functions
 
 
@@ -1847,6 +1934,13 @@ void loop()
     }
 #endif 
 
+    static unsigned long t_lastload=0;
+    if (opt_realtime_stats) {
+        if ((0==t_lastload) || ((unsigned long)(now - t_lastload) > 10 * 1000uL)) {
+            t_lastload = now;
+            update_realtime_stats();
+        }        
+    }
     delay(100); 
 }
 

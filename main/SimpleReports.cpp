@@ -96,8 +96,8 @@ void printEnvironment( Print& serial )
         ESP.getCpuFreqMHz());
     serial.printf("  Flash:" ANSI_BOLD "%" PRIu32 ANSI_RESET "K", 
         toKB(ESP.getFlashChipSize()));
-    serial.printf("  PSRAM:" ANSI_BOLD "%" PRIu32 ANSI_RESET "K",
-        toKB(ESP.getPsramSize() / 1024));
+    serial.printf("  PSRAM:" ANSI_BOLD "%" PRIu32 ANSI_RESET "M",
+        toKB(ESP.getPsramSize() / 1024u));
     serial.println();
 
     // static information about build environment

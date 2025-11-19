@@ -5,7 +5,7 @@
 # - a TXT file needed at build time when using Multinet7
 #
 
-# This Revision: $Id: oh_sr_commands.py 1929 2025-11-18 18:34:38Z  $
+# This Revision: $Id: oh_sr_commands.py 1930 2025-11-19 13:43:46Z  $
 
 #
 #   Copyright (C) 2025 Bernd Waldmann
@@ -122,7 +122,7 @@ def print_command( phrase:str, action:str, itemname:str, label:str, value:str ):
         return
 
     if len(phrase) > ESP_MN_MAX_PHRASE_LEN - 4:
-        print(f"Command '{phrase}' will be longer than ESP_MN_MAX_PHRASE_LEN, dropping this entity",file=sys.stderr)
+        print(f"Command '{phrase}' longer than {ESP_MN_MAX_PHRASE_LEN}, dropped",file=sys.stderr)
         return
 
     labels = g2p(phrase)
@@ -148,7 +148,8 @@ def english_g2p():
     response = get(OPENHAB_URL, headers=headers)
     items = response.json()
 
-    # Define re to remove anything but alphabet and spaces - multinet doesn't support them and too lazy to make them words
+    # Define re to remove anything but alphabet and spaces - multinet doesn't 
+    # support them and too lazy to make them words
     pattern = r'[^A-Za-z ]'
 
     out = "grapheme,phoneme,action,itemname,label,value\n"
@@ -198,7 +199,8 @@ def english_g2p():
         elif 'gVD' in groups:
             friendly_name = item['label']
             for cat in ["low","medium","high","off"]:
-                print_command(f"dim {friendly_name} to {cat}","dim",itemname,friendly_name,"{cat}")
+                phrase = f"dim {friendly_name} to {cat}"
+                print_command(phrase,"dim",itemname,friendly_name,"{cat}")
 
     # for item in items
     with open("../managed_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt","w") as f:

@@ -5,7 +5,7 @@
  * @date        2025-10-15
  * tabsize  4
  * 
- * This Revision: $Id: sr_commands.cpp 1929 2025-11-18 18:34:38Z  $
+ * This Revision: $Id: sr_commands.cpp 1930 2025-11-19 13:43:46Z  $
  */
 
 /*
@@ -179,14 +179,14 @@ bool SR_Commands::fill()
     ok = (ESP_OK==esp_mn_commands_clear());
     int i; command_info_t* pinfo;
     for (i=1, pinfo=_commands; i <= _n_commands; i++, pinfo++) {
-#if defined( CONFIG_SR_MN_EN_MULTINET7_QUANT)
+#if CONFIG_SR_MN_EN_MULTINET7_QUANT
         ret = esp_mn_commands_phoneme_add(i,pinfo->grapheme,pinfo->phoneme);
         ok = ok && (ESP_OK==ret);
         if (ret != ESP_OK) {
             log_e("esp_mn_commands_phoneme_add(%d) returns %d",i,(int)ret);
             break;
         }
-#elif defined(CONFIG_SR_MN_EN_MULTINET6_QUANT)
+#elif CONFIG_SR_MN_EN_MULTINET6_QUANT
         ok = ok && (ESP_OK==esp_mn_commands_add(i,pinfo->grapheme));
 #else
         ok = ok && (ESP_OK==esp_mn_commands_add(i,pinfo->phoneme));
