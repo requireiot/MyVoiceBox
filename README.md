@@ -226,4 +226,4 @@ I am aware of the following possible alternatives to my project, with similar ob
 
 ## License
 
-The code and schematics I created for this project are under an MIT license, see [LICENSE.txt](LICENSE.txt). Folder `components/` contains libraries cloned from other repositories, which may be under a different license, see each folder for more details.
+The code and schematics I created for this project are under th eMozilla Public License, see [LICENSE.txt](LICENSE.txt). Folder `components/` contains libraries cloned from other repositories, which may be under a different license, see each folder for more details.

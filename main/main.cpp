@@ -26,6 +26,8 @@
 //----- standard C and C++ headers
 #include <map>
 
+#include "sdkconfig.h"
+
 //----- Arduino and libraries
 #include <Arduino.h>
 #include <WiFi.h>
@@ -41,7 +43,6 @@
 #include <ESP_I2S.h>
  #include <ESP_SRx.h>
  #define ESP_SR ESP_SRx
-#include "sdkconfig.h"
 
 //----- project-specific headers
 #include "ansi.h"
@@ -97,24 +98,18 @@ const char VERSION[] =
  #define TX_NCHANNELS   1
 #endif
 
-#if (i2s_TX_BITS == 32)
- typedef int32_t tx_raw_t;
-#else
- typedef int16_t tx_raw_t;
-#endif
-
 //----- RX data format
 
 #define i2s_RX_STEREO 1
 #define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_32BIT     // what the hardware interface produces
 
 #define i2s_RX_BITS     16                                 // what the library delivers
+
+
 #if (i2s_RX_BITS == 32)
  #define RX_TRANSFORM    I2S_RX_TRANSFORM_NONE
- typedef int32_t rx_raw_t;
 #else
  #define RX_TRANSFORM    I2S_RX_TRANSFORM_32_TO_16
- typedef int16_t rx_raw_t;
 #endif
 
 #if i2s_RX_STEREO
@@ -151,6 +146,20 @@ const char VERSION[] =
 #pragma endregion
 //==============================================================================
 #pragma region Types
+
+
+#if (i2s_TX_BITS == 32)
+ typedef int32_t tx_raw_t;
+#else
+ typedef int16_t tx_raw_t;
+#endif
+
+
+#if (i2s_RX_BITS == 32)
+ typedef int32_t rx_raw_t;
+#else
+ typedef int16_t rx_raw_t;
+#endif
 
 
 /**
@@ -630,7 +639,7 @@ static void update_LED_mode()
 {
     switch (state) {
         case stIdle:        // Blue
-            rgbLED.set_color(0, 0, RGB_BRIGHTNESS); 
+            rgbLED.set_color(0, 0, RGB_BRIGHTNESS/4); 
             rgbLED.set_mode( StatusLED::MODE_BREATHE );
             break; 
         case stDetected:    // Yellow
@@ -885,12 +894,10 @@ void poll_Button()
 
 #pragma endregion
 //==============================================================================
-#pragma region Reporting stuff to UART
+#pragma region Reporting to UART
 
 
-void printSRinfo( Print& serial )
-{
-    static const char* wwname =
+static const char* wwname =
 #if CONFIG_SR_WN_WN9_ALEXA
         "WN9 Alexa";
 #elif CONFIG_SR_WN_WN9_HIESP
@@ -899,7 +906,7 @@ void printSRinfo( Print& serial )
         "unknown";
 #endif
 
-    static const char* mnname =
+static const char* mnname =
 #if CONFIG_SR_MN_EN_MULTINET7_QUANT
         "MultiNet7";
 #elif CONFIG_SR_MN_EN_MULTINET6_QUANT
@@ -907,6 +914,31 @@ void printSRinfo( Print& serial )
 #else
         "MultiNet5";
 #endif
+
+
+void reportSRinfoJSON( JsonDocument& doc )
+{
+    doc["wake"] = wwname;
+    doc["model"] = mnname;
+    doc["rate"] = SAMPLE_RATE;
+    doc["rx_bits"] = (int)i2s_RX_BITS;
+    doc["rx_ch"] = RX_NCHANNELS;
+    doc["tx_bits"] = (int)i2s_TX_BITS;
+    doc["tx_ch"] = TX_NCHANNELS;
+}
+
+
+const char* reportSRinfoString()
+{
+    JsonDocument doc;
+    reportSRinfoJSON(doc);
+    serializeJson(doc,msgbuf,sizeof(msgbuf));
+    return msgbuf;
+}
+
+
+void printSRinfo( Print& serial )
+{
 
     serial.printf(" I2S Audio: %d Hz, TX %d bits %s, RX %d/%d bits %s", 
         SAMPLE_RATE, 
@@ -948,7 +980,7 @@ void reportTasks()
 
 #pragma endregion
 //==============================================================================
-#pragma region WiFi stuff
+#pragma region WiFi 
 
 
 #define IF_NAME ANSI_MAGENTA "WiFi " ANSI_RESET
@@ -1093,7 +1125,7 @@ void collect_wav_bytes( const char* message, size_t length )
 
 #pragma endregion
 //==============================================================================
-#pragma region MQTT stuff
+#pragma region MQTT 
 
 
 /*
@@ -1297,7 +1329,7 @@ bool download_from_HTTP( const String& url, String& content, String& modified)
     if (res==200) {
         content = httpClient.getString();
         modified = httpClient.header("Last-Modified");
-        log_i("downloaded \n'" ANSI_BLUE "%s" ANSI_RESET "' (%s)", url.c_str(), modified.c_str() );
+        log_i("downloaded \n '" ANSI_BLUE "%s" ANSI_RESET "' (%s)", url.c_str(), modified.c_str() );
         return true;
     } else {
         log_e(ANSI_RED "failed to download \n'" ANSI_BLUE "%s" ANSI_RESET "' (%s)", url.c_str(), modified.c_str() );        
@@ -1365,10 +1397,12 @@ bool load_sr_commands()
 
     // try to read CSV from HTTP server
     if (download_and_store(HTTP_BASE_URL,CSV_NAME,csv,CSV_lastModified)) {
+        // got CSV file from HTTP server
         log_i(GREEN_OK "Read SR commands from server" );
     } else {
         log_w( ANSI_RED "can't download commands file %s" ANSI_RESET, 
             HTTP_BASE_URL CSV_NAME );
+        // try to read from flash
         File fp = LittleFS.open("/" CSV_NAME,"r");
         if (!fp) {
             log_e(ANSI_RED "can't read commands file from FFS" ANSI_RESET);
@@ -1834,7 +1868,7 @@ void setup()
 
     if (!config.is_valid()) {
         config = default_config;
-        log_i("initializing config, checksum=%ux",config.checksum);
+        log_i("initializing config, checksum=%x",config.checksum);
     } 
 
     stats.clear();
@@ -1873,6 +1907,7 @@ void setup()
     syslog.deviceHostname(WiFi.getHostname());
     syslog.logMask(LOG_UPTO(LOG_INFO));
     syslog.log( LOG_NOTICE, reportEnvironmentString() );
+    syslog.log( LOG_NOTICE, reportSRinfoString() );
 #else
     log_w("No syslog messages will be sent, SYSLOG_SERVER is not defined")
 #endif

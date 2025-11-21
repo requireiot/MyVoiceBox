@@ -54,7 +54,9 @@ uint16_t StatusLED::brightness_to_duty(uint8_t br)
  * @brief Initialize RGB LED, set all 3 LEDs to off
  * 
  */
-void StatusLED::init() {
+void StatusLED::init() 
+{
+    if (_pinA == -1) return;
     pinMode(_pinR,OUTPUT_OPEN_DRAIN);
     pinMode(_pinG,OUTPUT_OPEN_DRAIN);
     pinMode(_pinB,OUTPUT_OPEN_DRAIN);
@@ -73,7 +75,8 @@ void StatusLED::init() {
  */
 void StatusLED::set_duty( uint16_t duty ) 
 { 
-    _duty=duty; ledcWrite(_pinA,duty); 
+    _duty=duty; 
+    if (_pinA != -1) ledcWrite(_pinA,duty); 
 }
 
 
@@ -99,6 +102,7 @@ void StatusLED::set_brightness( uint8_t br )
  */
 void StatusLED::set_color( uint8_t r, uint8_t g, uint8_t b ) 
 {
+    if (_pinA == -1) return;
     digitalWrite(_pinR, r ? LOW : HIGH);
     digitalWrite(_pinG, g ? LOW : HIGH);
     digitalWrite(_pinB, b ? LOW : HIGH);
@@ -141,9 +145,24 @@ void StatusLED::tick()
             set_duty( brightness_to_duty(_brightness));
             break;
         case MODE_BREATHE:
+            /*
+                breathe cycle duration is set above, as TICK_PER_BREATHE, typically 200.
+
+                If set brightness > TICK_PER_BREATHE, say 255, then we increase 
+                brightness from 0 to 200 and back, in steps of 1.
+
+                If set brightness < TICK_PER_BREATHE, say 50, then we would increase 
+                brightness from 0-(200-50)=-150 to 200-(200-50)=50, with all 
+                steps < 0 set to black, so the LEDs are off for most of the cycle.
+
+                To avoid long periods of darkness when the brightness is set to a low level, 
+                we cut the dark period in half, by not cycling from -150 to 50 and back, 
+                but from 0 to 50 and back to -150.
+            */
             _count += _dir;
             if (_count==0) {
                 _dir = 1;
+                _count = max(0u,(TICK_PER_BREATHE - _brightness));
             } else if (_count >= TICK_PER_BREATHE) {
                 _dir = -1;
             }
