@@ -152,7 +152,7 @@ def english_g2p():
     # support them and too lazy to make them words
     pattern = r'[^A-Za-z ]'
 
-    out = "grapheme,phoneme,action,itemname,label,value\n"
+    out_csv = "grapheme,phoneme,action,itemname,label,value\n"
 
     for item in items:
         itemname = item['name']

@@ -1,3 +1,4 @@
+grapheme,phoneme,action,itemname,label,value
 "turn on tv light","TkN nN TmVm LiT","switch","TV_Light_Proxy","tv light","on"
 "turn off tv light","TkN eF TmVm LiT","switch","TV_Light_Proxy","tv light","off"
 "switch on tv light","SWgp nN TmVm LiT","switch","TV_Light_Proxy","tv light","on"
@@ -30,6 +31,10 @@
 "turn off pottery cabinet light","TkN eF PnTkm KaBcNcT LiT","switch","PotteryCabinet_Proxy","pottery cabinet light","off"
 "switch on pottery cabinet light","SWgp nN PnTkm KaBcNcT LiT","switch","PotteryCabinet_Proxy","pottery cabinet light","on"
 "switch off pottery cabinet light","SWgp eF PnTkm KaBcNcT LiT","switch","PotteryCabinet_Proxy","pottery cabinet light","off"
+"turn on cynthias blanket","TkN nN SgNvmcZ BLalKcT","switch","Plug_E_Proxy","cynthias blanket","on"
+"turn off cynthias blanket","TkN eF SgNvmcZ BLalKcT","switch","Plug_E_Proxy","cynthias blanket","off"
+"switch on cynthias blanket","SWgp nN SgNvmcZ BLalKcT","switch","Plug_E_Proxy","cynthias blanket","on"
+"switch off cynthias blanket","SWgp eF SgNvmcZ BLalKcT","switch","Plug_E_Proxy","cynthias blanket","off"
 "turn on guest bedroom floor lamp","TkN nN GfST BfDRoM FLeR LaMP","switch","Sonoff_G_Proxy","guest bedroom floor lamp","on"
 "turn off guest bedroom floor lamp","TkN eF GfST BfDRoM FLeR LaMP","switch","Sonoff_G_Proxy","guest bedroom floor lamp","off"
 "switch on guest bedroom floor lamp","SWgp nN GfST BfDRoM FLeR LaMP","switch","Sonoff_G_Proxy","guest bedroom floor lamp","on"
