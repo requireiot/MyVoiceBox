@@ -5,7 +5,7 @@
  * Created		: 21-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: SimpleReports.cpp 1870 2025-09-29 13:11:39Z  $
+ * This Revision: $Id: SimpleReports.cpp 1936 2025-11-29 20:52:45Z  $
  */
 
 /*
@@ -150,11 +150,19 @@ const char* reportEnvironmentString()
  * 
  * @param serial    Serial port to print to 
  */
-void printMemoryInfo( Print& serial )
+void printMemoryInfo( Print& serial, const char* description )
 {
+    static int32_t old_heap;
+    int32_t new_heap = ESP.getFreeHeap();
+
+    if (description) {
+        serial.printf(ANSI_REVERSED " %s " ANSI_RESET, description);
+        serial.printf(" down " ANSI_RED "%" PRIi32 ANSI_RESET, old_heap-new_heap);
+        old_heap = new_heap;
+    }
     serial.printf(
-        " Heap: " ANSI_BOLD "%" PRIu32 ANSI_RESET "/%" PRIu32,
-        ESP.getFreeHeap(), ESP.getHeapSize() );
+        " Heap: " ANSI_BOLD "%" PRIi32 ANSI_RESET "/%" PRIu32,
+        new_heap, ESP.getHeapSize() );
     serial.printf( 
         "  min:" ANSI_BOLD "%" PRIu32 ANSI_RESET 
         "  alloc:" ANSI_BOLD "%" PRIu32 ANSI_RESET,

@@ -5,7 +5,7 @@
 # - a TXT file needed at build time when using Multinet7
 #
 
-# This Revision: $Id: oh_sr_commands.py 1930 2025-11-19 13:43:46Z  $
+# This Revision: $Id: oh_sr_commands.py 1938 2025-12-01 09:52:16Z  $
 
 #
 #   Copyright (C) 2025 Bernd Waldmann

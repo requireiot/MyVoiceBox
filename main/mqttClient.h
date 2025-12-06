@@ -1,11 +1,11 @@
 /**
- * @file 		  SimpleMqttClientESP.h
+ * @file 		  mqttClient.h
  *
  * Author		: Bernd Waldmann
  * Created		: 23-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: SimpleMQTTClientESP.h 1916 2025-11-10 11:02:02Z  $
+ * This Revision: $Id: mqttClient.h 1940 2025-12-03 23:14:38Z  $
  */
 
 /*
@@ -20,16 +20,22 @@
 
 #include "mqtt_client.h"
 #include "esp_event.h"
+#include <vector>
 
 
 class SimpleMqttClientESP {
     typedef void (*receive_cb_t)(const char *, const char*, size_t, size_t);
+    typedef struct subscription_t { String prefix; receive_cb_t callback; } subscription_t;
 protected:
+    static unsigned _clientNo;
     esp_mqtt_client_handle_t _client;
     const char* _broker;
     String _publishTopic;
     String _subscribeTopic;
-    receive_cb_t _receive_cb;
+    String _prefix;
+    receive_cb_t _multipart_cb;
+    std::vector<subscription_t> _subscriptions;
+    unsigned _total_bytes_received;
 
     static void _on_event(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
     void _on_receive( 
@@ -39,13 +45,12 @@ public:
     bool _connected;
 
     SimpleMqttClientESP( const char* broker ) 
-        : _broker(broker), _receive_cb(nullptr), _connected(false) {}
+        : _broker(broker), _connected(false) {}
 
-    bool begin( const char* subscribeTopic=nullptr, const char* publishTopic=nullptr );
+    bool begin( const char* publishTopic=nullptr );
     void publish(const char* topic, const char* subtopic,const char* payload, bool retain=false);
     void publish(const char* subtopic,const char* payload, bool retain=false);
-    void do_subscribe();
     bool isConnected() const { return _connected; }
 
-    void onReceive( receive_cb_t cb ) { _receive_cb = cb; };
+    void on( const char* subscribeTopic, receive_cb_t cb );
 };

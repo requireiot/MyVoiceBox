@@ -5,7 +5,7 @@
  * @date        2025-10-15
  * tabsize  4
  * 
- * This Revision: $Id: sr_commands.cpp 1930 2025-11-19 13:43:46Z  $
+ * This Revision: $Id: sr_commands.cpp 1938 2025-12-01 09:52:16Z  $
  */
 
 /*
@@ -32,7 +32,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <ctype.h>
-
+#include <Arduino.h>
 #include "esp_mn_speech_commands.h"
 #include "esp32-hal-sr.h"
 #include "esp32-hal-log.h"
@@ -127,7 +127,8 @@ bool SR_Commands::parse_csv( const char* csv )
 {
     // let's make a copy of the CSV text on the heap so we can chop it up
     if (_text) free(_text);
-    _text = (char*) malloc(strlen(csv)+1);
+    // allocate in PSRAM, doesn't matter that this is slower, we don't use it much
+    _text = (char*) heap_caps_malloc(strlen(csv)+1,MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     strcpy( _text, csv );
 
     // free array buffer, if it has been used before
@@ -135,6 +136,7 @@ bool SR_Commands::parse_csv( const char* csv )
         free(_commands);
         _commands = NULL;
     }
+    _n_commands = 0;
 
     log_d("parsing CSV text = \n'%s'", _text );
 
@@ -157,6 +159,11 @@ bool SR_Commands::parse_csv( const char* csv )
         pcommand->value    = trim_quotes( strtok(NULL,",\"") );
     }
     log_i("parsed %d commands",(int)_n_commands);
+    // re-allocate to PSRAM to save some heap
+    _commands = (command_info_t*) heap_caps_realloc(
+        _commands, _n_commands*sizeof(command_info_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
     return true;
 }
 
@@ -177,10 +184,18 @@ bool SR_Commands::fill()
     bool ok;
     esp_err_t ret;
     ok = (ESP_OK==esp_mn_commands_clear());
+    if (!ok) {
+        log_e("Can't do esp_mn_commands_clear()");
+        return false;
+    }
     int i; command_info_t* pinfo;
+    String s;
     for (i=1, pinfo=_commands; i <= _n_commands; i++, pinfo++) {
 #if CONFIG_SR_MN_EN_MULTINET7_QUANT
-        ret = esp_mn_commands_phoneme_add(i,pinfo->grapheme,pinfo->phoneme);
+        s = pinfo->grapheme;
+        s.toUpperCase();
+        ret = esp_mn_commands_phoneme_add(i,s.c_str(),pinfo->phoneme);
+        log_d("add %d '%s' '%s'",i,s.c_str(),pinfo->phoneme);
         ok = ok && (ESP_OK==ret);
         if (ret != ESP_OK) {
             log_e("esp_mn_commands_phoneme_add(%d) returns %d",i,(int)ret);
@@ -193,7 +208,10 @@ bool SR_Commands::fill()
 #endif
     }
     log_i("defined %d commands",i-1);
-    ok = ok && (NULL==esp_mn_commands_update());
+    esp_mn_error_t* errs = esp_mn_commands_update();
+    if (errs) 
+        log_e("esp_mn_commands_update() returned errors");
+    ok = ok && (NULL==errs);
     return ok;
 }
 

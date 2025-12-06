@@ -2,7 +2,7 @@
 
 void printResetReason( Print& serial );
 void printEnvironment( Print& serial );
-void printMemoryInfo( Print& serial );
+void printMemoryInfo( Print& serial, const char* description=NULL );
 void printNetworkInfo( Print& serial );
 
 void reportEnvironmentJSON( JsonDocument& doc );
