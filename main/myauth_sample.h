@@ -12,17 +12,15 @@
 #define FTP_PASS    "my-ftp-password"
 
 // where to get speech commands .CSV file
-#define HTTP_SERVER "http://my-http-server.home/ota"    // no trailing slash !
+#define HTTP_BASE_URL "http://my-http-server.home/ota/"
 
 // MQTT broker used by Rhasspy
 #define MQTT_BROKER_RHASSPY  "my-rhasspy-machine.home"
 
+// MQTT broker used by OpenHAB (may be the same as above)
+#define MQTT_BROKER_OPENHAB "my-openhab-machine.home"
+
 // local NTP server, so this gadget does not need internet access
 #define NTP_SERVER "fritz.box"
-
-// Syslog server -- if not defined, then no syslog messages are sent
-#define SYSLOG_SERVER "my-log-server.home"
-#define SYSLOG_PORT 514
-
 
 #endif // __MYAUTH_H

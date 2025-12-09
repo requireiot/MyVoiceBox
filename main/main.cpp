@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1938 2025-12-01 09:52:16Z  $
+ * This Revision: $Id: main.cpp 1943 2025-12-09 11:07:18Z  $
  */
 
 /*
@@ -59,7 +59,7 @@
 #include "uploadWAV.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1938 2025-12-01 09:52:16Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1943 2025-12-09 11:07:18Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -227,7 +227,7 @@ enum state_t {
 
 #define DebugSerial Serial0
 
-char msgbuf[256];
+char msgbuf[512];
 
 time_t bootTime;
 
@@ -614,11 +614,11 @@ String timeNow()
 }
 
 
-String formatUptime( time_t now )
+String formatUptime( time_t uptime )
 {
     char buf[20];
 
-    time_t seconds = now; 
+    time_t seconds = uptime; 
     int days = seconds / (24 * 60 * 60L);
     seconds -= days * (24 * 60 * 60L);
     int hours = seconds / (60 * 60L);
@@ -1095,7 +1095,6 @@ const char* reportSRinfoString()
 
 void printSRinfo( Print& serial )
 {
-
     serial.printf(" I2S Audio: %d Hz, TX %d bits %s, RX %d/%d bits %s", 
         SAMPLE_RATE, 
         (int)i2s_TX_BITS,
@@ -1119,26 +1118,15 @@ void print_all_Environment( Print& serial )
 }
 
 
-/**
- * @brief Report current FreeRTOS tasks
- * 
- */
-void reportTasks()
+const char* myDebugReport()
 {
-    /*
-    unsigned ntasks = uxTaskGetNumberOfTasks();
-    TaskStatus_t status[ntasks];
-    unsigned n = uxTaskGetSystemState( status, ntasks, NULL );
-    */
-    DebugSerial.printf( "\nTask Name\tStatus\tPrio\tHWM\tTask\tAffinity\n");
-    DebugSerial.printf( "---------\t-------\t-------\t-------\t-------\t--------\n");
-    char* stats_buffer = (char*)malloc(1024);
-    vTaskList(stats_buffer);
-    DebugSerial.printf("%s\n", stats_buffer);
-    DebugSerial.println();
-    free(stats_buffer);
+    JsonDocument doc;
+    
+    doc["Uptime"] = formatUptime(time(NULL)-bootTime).c_str();
+    reportMemoryInfoJSON(doc);
+    serializeJson(doc,msgbuf,sizeof(msgbuf));
+    return msgbuf;
 }
-
 
 #pragma endregion
 //==============================================================================
@@ -1154,32 +1142,39 @@ void reportTasks()
 #define SNTP_GET_SERVERS_FROM_DHCP 1
 #include <esp_sntp.h>
 
-static bool init_NTP()
+
+static void print_NTP_servers(void)
 {
-    
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);
-    /*
-    config.start = false;                       // start the SNTP service explicitly
-    config.server_from_dhcp = true;             // accept the NTP offer from the DHCP server
-    config.renew_servers_after_new_IP = true;   // let esp-netif update the configured SNTP server(s) after receiving the DHCP lease
-    config.index_of_first_server = 1;           // updates from server num 1, leaving server 0 (from DHCP) intact
-    config.ip_event_to_renew = IP_EVENT_STA_GOT_IP;  // IP event on which you refresh your configuration
-    */
+    for (uint8_t i = 0; i < SNTP_MAX_SERVERS; ++i){
+        if (esp_sntp_getservername(i)){
+            log_i(IF_NAME "NTP server %d: %s", i, esp_sntp_getservername(i));
+        } else {
+            // we have either IPv4 or IPv6 address, let's print it
+            char buff[IP4ADDR_STRLEN_MAX];
+            ip_addr_t const *ip = esp_sntp_getserver(i);
+            if (ipaddr_ntoa_r(ip, buff, IP4ADDR_STRLEN_MAX) != NULL)
+                log_i(IF_NAME "NTP server %d: %s", i, buff);
+        }
+    }
+}
+
+
+static bool init_NTP()
+{  
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(NTP_SERVER);   
+//    config.start = false;                       // start the SNTP service explicitly
+//    config.server_from_dhcp = true;             // accept the NTP offer from the DHCP server
+//    config.renew_servers_after_new_IP = true;   // let esp-netif update the configured SNTP server(s) after receiving the DHCP lease
+//    config.index_of_first_server = 1;           // updates from server num 1, leaving server 0 (from DHCP) intact
+//    config.ip_event_to_renew = IP_EVENT_STA_GOT_IP;  // IP event on which you refresh your configuration
     return (ESP_OK==esp_netif_sntp_init(&config));
-    
-    /*
-    esp_sntp_servermode_dhcp(1); //try to get the ntp server from dhcp
-    esp_sntp_setservername(1, NTP_SERVER ); //fallback server
-    esp_sntp_init();
-    return true;
-    */
 }
 
 
 static bool start_NTP()
-{
-    
-    ON_ERROR_RETURN_FALSE(esp_netif_sntp_start());
+{   
+//    ON_ERROR_RETURN_FALSE(esp_netif_sntp_start());
+    print_NTP_servers();
     return true;
 }
 
@@ -1237,6 +1232,8 @@ bool setupWifi()
 {
     BEGIN_HEAP_TRACE();
     WiFi.onEvent(onWiFiEvent);
+    WiFi.persistent( false );    
+    WiFi.setAutoReconnect(false);
     init_NTP();
     WiFi.mode(WIFI_STA);
     WiFi.begin( WIFI_SSID, WIFI_PASSWORD );
@@ -1939,9 +1936,11 @@ void init_Webserver()
     //----- return JSON strings with various system info
 
     server.on("/env",[](AsyncWebServerRequest *request) {
+        log_i(HTTPD "request " ANSI_BLUE "/env" ANSI_RESET);
         request->send(200, "application/json", reportEnvironmentString());
     });
     server.on("/mem",[](AsyncWebServerRequest *request) {
+        log_i(HTTPD "request " ANSI_BLUE "/mem" ANSI_RESET);
         request->send(200, "application/json", reportMemoryInfoString());
     });
 
@@ -2004,8 +2003,8 @@ void setup()
     if (!init_FS()) fail("LittleFS mount failed"); 
 
     //----- I2S ----------------------------------------------------------------
-    if (!initVoiceRecorder()) fail("Can't init voice recorder");
-    if (!i2s_rx_tx_initialize()) fail("Can't initialize I2S RX/TX");
+    if (!initVoiceRecorder()) fail("can't init voice recorder");
+    if (!i2s_rx_tx_initialize()) fail("can't initialize I2S RX/TX");
     xTaskCreate(i2s_tx_task, "i2s_tx_task", 4000, NULL, 5, NULL); 
 
     //----- WAV jingles from SPIFFS --------------------------------------------
@@ -2014,19 +2013,18 @@ void setup()
     ok = ok && loadWAV("/beep_wake.wav", beep_wake);
     ok = ok && loadWAV("/beep_error.wav", beep_error);
     if (!ok) fail("can't load WAV files");
-    start_playing( beep_hello );
 
     //----- WiFi ---------------------------------------------------------------
     if (!setupWifi()) fail("Can't connect to WiFi");
 
     //----- MQTT ---------------------------------------------------------------
-    if (!initRhMQTT()) fail("Failed to connect to Rhasspy MQTT broker");
-    if (!initInfoMqtt()) fail("Failed to connect to OpenHAB MQTT broker");
+    if (!initRhMQTT()) fail("can't connect to Rhasspy MQTT broker");
+    if (!initInfoMqtt()) fail("can't connect to OpenHAB MQTT broker");
 
     // now that the boring bootloader and WiFi messages are over, let's have more info
     esp_log_level_set("*", ESP_LOG_INFO);
 
-    setupOTA(DebugSerial); 
+    start_playing( beep_hello );
 
 #if USE_WEBSERVER
     init_Webserver();
@@ -2042,7 +2040,6 @@ void setup()
 	});
 
     publishDebugInfo();
-    //reportTasks();
     printMemoryInfo(DebugSerial);
 
     bootTime = time(NULL);    
@@ -2067,8 +2064,7 @@ void loop()
 
     // once per day, report memory status
     EVERY(INTERVAL_DEBUG_REPORT)
-        ohMqttClient.publish("debug",reportMemoryInfoString(),true);
-        ohMqttClient.publish("uptime",formatUptime(time(NULL)-bootTime).c_str());
+        ohMqttClient.publish("debug",myDebugReport(),true);
     END_EVERY
 
     if (opt_realtime_stats) {

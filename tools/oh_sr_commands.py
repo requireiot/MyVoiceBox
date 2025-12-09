@@ -5,7 +5,7 @@
 # - a TXT file needed at build time when using Multinet7
 #
 
-# This Revision: $Id: oh_sr_commands.py 1938 2025-12-01 09:52:16Z  $
+# This Revision: $Id: oh_sr_commands.py 1945 2025-12-09 17:34:46Z  $
 
 #
 #   Copyright (C) 2025 Bernd Waldmann
@@ -200,7 +200,7 @@ def english_g2p():
             friendly_name = item['label']
             for cat in ["low","medium","high","off"]:
                 phrase = f"dim {friendly_name} to {cat}"
-                print_command(phrase,"dim",itemname,friendly_name,"{cat}")
+                print_command(phrase,"dim",itemname,friendly_name,f"{cat}")
 
     # for item in items
     with open("../managed_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt","w") as f:
