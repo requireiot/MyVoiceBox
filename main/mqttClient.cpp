@@ -90,16 +90,9 @@ void SimpleMqttClientESP::_on_event(void *handler_args, esp_event_base_t base, i
 /**
  * @brief start with MQTT client, connect to broker and define topics
  * 
- * @param subTopic  topic to subscribe to when connected, or NULL if none. 
- *                  This can be a full topic like "home/status", or a base topic 
- *                  ending with "/", in which case we subscribe to all subtopics.
  * @param pubTopic  top-level topic to publish to, or NULL if none
  * @return true     if connection succeeded
  * @return false    if connection failed
- * 
- * @note  The pattern mazching is primitive, so DO NOT use wildcards in the middle 
- * of the path -- subscribing to "one/two/three/+" is ok, but subscribing to
- * "one/+/three/" is not.
  */
 bool SimpleMqttClientESP::begin( const char* pubTopic )
 {
@@ -138,13 +131,14 @@ bool SimpleMqttClientESP::begin( const char* pubTopic )
 
 
 /**
- * @brief MQTT subscribe callback, called when mesage arrives. It calls the 
- * _receive_cb() method of the instance. If a subscribe topic was defined in 
- * begin(), it is stripped off the topic parameter before calling _receive_cb().
+ * @brief MQTT subscribe callback, called when mesage arrives. If a matching 
+ * subscribe topic was defined, then the corresponding callback is called.
  * 
- * @param topic     full topic of received message, 0-terminated
- * @param payload   message as a byte string, not 0-terminated
- * @param length    number of bytes in payload
+ * @param topic         full topic of received message, 0-terminated
+ * @param topic_len     length of topic
+ * @param payload       message as a byte string, not 0-terminated
+ * @param length        number of bytes in payload of this message
+ * @param total_length  for multipart messages, total length of payload
  */
 void SimpleMqttClientESP::_on_receive( 
     char* topic, unsigned topic_len,
@@ -213,6 +207,10 @@ void SimpleMqttClientESP::_on_receive(
  * 
  * @param subscribeTopic  topic to subscribe to, can end in + or #
  * @param cb              callback function to receive
+ * 
+ * @note  The pattern matching is primitive, so DO NOT use wildcards in the middle 
+ * of the path -- subscribing to "one/two/three/+" will work, but subscribing to
+ * "one/+/three/" will not.
  */
 void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
 {
@@ -239,7 +237,7 @@ void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
 /**
  * @brief Publish a message to MQTT broker
  * 
- * @param topic       first part of topic for publishing. May contain $(HOSTNAME), 
+ * @param topic       first part of topic for publishing. May contain "$(HOSTNAME)", 
  *                      which will be replace by WiFi hostname
  * @param subtopic    second part of topic for publishing, may be NULL
  * @param payload     message payload, 0-terminated

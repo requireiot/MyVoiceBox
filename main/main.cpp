@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1943 2025-12-09 11:07:18Z  $
+ * This Revision: $Id: main.cpp 1954 2025-12-31 20:29:25Z  $
  */
 
 /*
@@ -59,7 +59,7 @@
 #include "uploadWAV.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1943 2025-12-09 11:07:18Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1954 2025-12-31 20:29:25Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -288,6 +288,7 @@ bool opt_realtime_stats = false;
 struct stats_t {
     unsigned n_cmds_ok;
     unsigned n_cmds_err;
+    unsigned n_spoken;
     void clear() 
         { memset(this,0,sizeof(*this)); }
 } stats;
@@ -409,6 +410,12 @@ const std::map<const std::string, conv_t> config_mapper = {
     }},
     { "ncmdserr", {
         []() { return String( stats.n_cmds_err ); },
+        NULL,
+        NULL,
+        NULL
+    }},
+    { "nspoken", {
+        []() { return String( stats.n_spoken ); },
         NULL,
         NULL,
         NULL
@@ -1123,6 +1130,9 @@ const char* myDebugReport()
     JsonDocument doc;
     
     doc["Uptime"] = formatUptime(time(NULL)-bootTime).c_str();
+    doc["n_spoken"] = stats.n_spoken;
+    doc["n_cmds_ok"] = stats.n_cmds_ok;
+    doc["n_cmds_err"] = stats.n_cmds_err;
     reportMemoryInfoJSON(doc);
     serializeJson(doc,msgbuf,sizeof(msgbuf));
     return msgbuf;
@@ -1306,6 +1316,7 @@ void stop_collecting()
     if (config.gain_mqtt)
         amplify( wav.buf, nsamples, config.gain_mqtt );
     start_playing( wav );
+    stats.n_spoken++;
 }
 
 
@@ -1382,9 +1393,9 @@ const char hermes_intent[] = R"rawliteral({
  "siteId": "%s", 
  "slots": [
   {"entity": "state","value":{"value":"%s"}}, 
-  {"entity": "oh_items","value":{"value":"%s"},"rawValue":"%s", }
+  {"entity": "oh_items","value":{"value":"%s"},"rawValue":"%s"}
  ], 
- "rawInput": "%s", 
+ "rawInput": "%s"
 })rawliteral";
 
 /// MQTT message "wakeword detected", subset of what Rhasspy would produce
@@ -1398,6 +1409,7 @@ const char hermes_timeout[] = R"rawliteral({"siteId": "%s"})rawliteral";
 #define TOPIC_TIMEOUT_OCCURRED "hermes/nlu/intentNotRecognized"
 
 /// MQTT message "playback finished"
+// 1st and 2nd arg is UUID from play command
 const char hermes_playFinished[] = R"rawliteral({"id": "%s", "sessionId": "%s"})rawliteral";
 #define TOPIC_PLAYFINISHED "hermes/audioServer/${HOSTNAME}/playFinished"
 
@@ -2062,7 +2074,7 @@ void loop()
             saveWave(WiFi.getHostname()+8, voice.buf, voice_samples);
     }
 
-    // once per day, report memory status
+    // once per day or so, report memory status
     EVERY(INTERVAL_DEBUG_REPORT)
         ohMqttClient.publish("debug",myDebugReport(),true);
     END_EVERY
