@@ -200,6 +200,7 @@ void reportMemoryInfoJSON( JsonDocument& doc )
 const char* reportMemoryInfoString()
 {
     JsonDocument doc;
+    
     reportMemoryInfoJSON(doc);
     serializeJson(doc,msgbuf,sizeof(msgbuf));
     return msgbuf;

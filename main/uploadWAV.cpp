@@ -1,6 +1,6 @@
 /**
  * @file        uploadWAV.cpp
- * @project     test_Skainet
+ * @project     MyVoiceBox
  * @author      Bernd Waldmann (you@domain.com)
  * @date        2025-10-06
  * tabsize  4

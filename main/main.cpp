@@ -1268,7 +1268,7 @@ bool setupWifi()
 bool loopWifi()
 {
     if (WiFi.status() != WL_CONNECTED) {
-        delay(1);
+        delay(100);
         setupWifi();
     }
     return WiFi.isConnected();
@@ -1968,6 +1968,10 @@ void init_Webserver()
         }
         request->send(404, "text/plain", "Not found");
     });
+
+    DefaultHeaders::Instance().addHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    DefaultHeaders::Instance().addHeader("Pragma", "no-cache");
+    DefaultHeaders::Instance().addHeader("Expires", "0");
 
     server.begin();
     log_i(HTTPD "HTTP server initialized");

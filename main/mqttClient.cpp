@@ -56,7 +56,7 @@ void SimpleMqttClientESP::_on_event(void *handler_args, esp_event_base_t base, i
     case MQTT_EVENT_CONNECTED:
         log_d(TAG "MQTT_EVENT_CONNECTED");
         theClient->_connected=true;
-        log_d(TAG "connected to broker");
+        theClient->do_subscribe();
         break;
     case MQTT_EVENT_DISCONNECTED:
         log_w(TAG ANSI_RED "MQTT_EVENT_DISCONNECTED" ANSI_RESET);
@@ -203,7 +203,7 @@ void SimpleMqttClientESP::_on_receive(
 
 /**
  * @brief Subscribe to messages. Can be called multiple times. 
- * Call this /after/ calling begin().
+ * Call this /before/ calling begin().
  * 
  * @param subscribeTopic  topic to subscribe to, can end in + or #
  * @param cb              callback function to receive
@@ -214,8 +214,6 @@ void SimpleMqttClientESP::_on_receive(
  */
 void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
 {
-    if (!isConnected()) return;
-
     String topic(subscribeTopic);
     topic.replace("${HOSTNAME}",WiFi.getHostname());
     String prefix = topic;
@@ -226,11 +224,24 @@ void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
     subscription_t sub = { .prefix=prefix, .callback=cb };
     _subscriptions.push_back(sub);
 
-    log_i(TAG "subscribe %d at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
-        _subscriptions.size(),
-        _broker,
-        topic.c_str());
-    esp_mqtt_client_subscribe_single(_client, topic.c_str(), 0);
+    if (isConnected()) {
+        esp_mqtt_client_subscribe_single(_client, topic.c_str(), 0);
+        log_i(TAG "subscribe %d at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
+            _subscriptions.size(),
+            _broker,
+            topic.c_str());
+    }
+}
+
+
+void SimpleMqttClientESP::do_subscribe()
+{
+    for (auto sub : _subscriptions) {
+        esp_mqtt_client_subscribe_single(_client, sub.prefix.c_str(), 0);
+        log_i(TAG "subscribe at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
+            _broker,
+            sub.prefix.c_str());
+    }
 }
 
 

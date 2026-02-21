@@ -41,6 +41,7 @@ protected:
     void _on_receive( 
         char* topic, unsigned topic_len, 
         byte* payload, unsigned payload_len, unsigned total_length );
+    void do_subscribe();
 public:
     bool _connected;
 

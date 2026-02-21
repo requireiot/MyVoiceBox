@@ -1,6 +1,6 @@
 /**
- * @file        parse_sr_commands.cpp
- * @project     ESP_SR test projects
+ * @file        sr_commands.cpp
+ * @project     MyVoiceBox
  * @author      Bernd Waldmann (you@domain.com)
  * @date        2025-10-15
  * tabsize  4
