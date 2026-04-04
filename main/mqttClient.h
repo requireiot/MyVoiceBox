@@ -25,7 +25,11 @@
 
 class SimpleMqttClientESP {
     typedef void (*receive_cb_t)(const char *, const char*, size_t, size_t);
-    typedef struct subscription_t { String prefix; receive_cb_t callback; } subscription_t;
+    typedef struct subscription_t { 
+        String prefix; 
+        String topic;
+        receive_cb_t callback; 
+    } subscription_t;
 protected:
     static unsigned _clientNo;
     esp_mqtt_client_handle_t _client;

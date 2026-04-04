@@ -5,7 +5,7 @@
  * @date        2025-10-15
  * tabsize  4
  * 
- * This Revision: $Id: sr_commands.cpp 1943 2025-12-09 11:07:18Z  $
+ * This Revision: $Id: sr_commands.cpp 1967 2026-04-04 17:23:10Z  $
  */
 
 /*
@@ -38,6 +38,7 @@
 #include "esp32-hal-log.h"
 #include "sdkconfig.h"
 
+#include "ansi.h"
 #include "sr_commands.h"
 
 /// @brief  array with info about all commands
@@ -147,7 +148,7 @@ bool SR_Commands::parse_csv( const char* csv )
     log_d("header line is '%s'", line);
     if (strcmp( line, "grapheme,phoneme,action,itemname,label,value" ))
         return false;
-    while ( (line=next_line(&ptext)) ) {
+    while ( (line=trim_line(next_line(&ptext))) ) {
         log_d("Parsing line '%s'",line);
         if (line[0]==0) break;   // ignore empty line
         command_info_t* pcommand = add_command();
@@ -157,6 +158,22 @@ bool SR_Commands::parse_csv( const char* csv )
         pcommand->itemname = trim_quotes( strtok(NULL,",\"") );
         pcommand->label    = trim_quotes( strtok(NULL,",\"") );
         pcommand->value    = trim_quotes( strtok(NULL,",\"") );
+        log_d("Id:%d "
+            "gr:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            " ph:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            " action:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            " item:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            " label:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            " value:'" ANSI_BOLD "%s" ANSI_RESET "'"
+            ,
+            _n_commands,
+            pcommand->grapheme,
+            pcommand->phoneme,
+            pcommand->action,
+            pcommand->itemname,
+            pcommand->label,
+            pcommand->value ? pcommand->value : "(nil)"
+        );
     }
     log_i("parsed %d commands",(int)_n_commands);
     // re-allocate to PSRAM to save some heap

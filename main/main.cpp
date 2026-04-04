@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1954 2025-12-31 20:29:25Z  $
+ * This Revision: $Id: main.cpp 1967 2026-04-04 17:23:10Z  $
  */
 
 /*
@@ -53,13 +53,15 @@
 #if HAS_RGB_LED
  #include "StatusLED.h"
 #endif
+#include "rsyslog.h"
+
 //----- project-specific headers
 #include "myauth.h"
 #include "sr_commands.h"
 #include "uploadWAV.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1954 2025-12-31 20:29:25Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1967 2026-04-04 17:23:10Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -214,7 +216,8 @@ enum state_t {
     stDetected, 
     stCommandOk, 
     stCommandError,
-    stSystemError
+    stSystemError,
+    stOTA
 };
 
 
@@ -811,24 +814,28 @@ void i2s_tx_task( void* userData )
 void update_LED_mode( state_t state )
 {
     switch (state) {
-        case stIdle:        // Blue
+        case stIdle:        // Blue breathe
             rgbLED.set_color(0, 0, RGB_BRIGHTNESS/4); 
             rgbLED.set_mode( StatusLED::MODE_BREATHE );
             break; 
-        case stDetected:    // Yellow
+        case stDetected:    // Yellow blink
             rgbLED.set_color(RGB_BRIGHTNESS, RGB_BRIGHTNESS, 0 ); 
             rgbLED.set_mode( StatusLED::MODE_BLINK );
             break; 
-        case stCommandOk:   // Green
+        case stCommandOk:   // Green solid
             rgbLED.set_color(0, RGB_BRIGHTNESS, 0); 
             rgbLED.set_mode( StatusLED::MODE_ON );
             break; 
-        case stCommandError:  // Red
+        case stCommandError:  // Red solid
             rgbLED.set_color(RGB_BRIGHTNESS, 0, 0); 
             rgbLED.set_mode( StatusLED::MODE_ON );
             break; 
-        case stSystemError:
+        case stSystemError:     // Red blink
             rgbLED.set_color(255,0,0);
+            rgbLED.set_mode(StatusLED::MODE_BLINK);
+            break;
+        case stOTA:             // Green blink
+            rgbLED.set_color(0,255,0);
             rgbLED.set_mode(StatusLED::MODE_BLINK);
             break;
         default: 
@@ -1373,10 +1380,8 @@ void publishDebugInfo()
 bool initInfoMqtt()
 {
     BEGIN_HEAP_TRACE();
+    ohMqttClient.on( MQTT_SUB_INFO_IN "+", onReceiveOh );
     bool ok = ohMqttClient.begin( MQTT_PUB_INFO );
-    if (ok) {
-        ohMqttClient.on( MQTT_SUB_INFO_IN "+", onReceiveOh );
-    }
     END_HEAP_TRACE();
     return ok;
 }
@@ -1454,7 +1459,7 @@ void publish_command( int id )
         char* msg = (char*) malloc(MSG_BUFLEN);
         snprintf( msg, MSG_BUFLEN, hermes_intent,
             WiFi.getHostname(), 
-            pinfo->value,
+            (pinfo->value && pinfo->value[0]) ? pinfo->value : "nil" ,
             pinfo->itemname,
             pinfo->label,
             pinfo->grapheme
@@ -1530,10 +1535,8 @@ void onReceiveRh(
 bool initRhMQTT()
 {
     BEGIN_HEAP_TRACE();
+    rhMqttClient.on( "hermes/audioServer/${HOSTNAME}/playBytes/", onReceiveRh );
     bool ok = rhMqttClient.begin( "hermes/intent/" );
-    if (ok) {
-        rhMqttClient.on( "hermes/audioServer/${HOSTNAME}/playBytes/", onReceiveRh );
-    }
     END_HEAP_TRACE();
     return ok;
 }
@@ -1629,8 +1632,10 @@ bool load_sr_commands()
  */
 void updateCommands()
 {
+    ESP_SR.pause();
     if (load_sr_commands())
         srCommands.fill();
+    ESP_SR.resume();
 }
 
 
@@ -1650,12 +1655,14 @@ void reportCommand( int id )
             " text='" ANSI_BOLD "%s" ANSI_RESET "',"
             " action='" ANSI_BOLD "%s" ANSI_RESET "',"
             " item='" ANSI_BOLD "%s" ANSI_RESET "',"
-            " value='" ANSI_BOLD "%s" ANSI_RESET "'",
+            " value='" ANSI_BOLD "%s" ANSI_RESET "'"
+            "\n"
+            ,
             id,
             pinfo->grapheme,
             pinfo->action,
             pinfo->itemname,
-            pinfo->value ? pinfo->value : "(none)"
+            pinfo->value ? pinfo->value : "nil"
         );
     }
 }
@@ -1671,17 +1678,17 @@ void reportCommand( int id )
 void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
     switch (event) {
         case SR_EVENT_WAKEWORD: 
-            log_d("WakeWord Detected!"); 
+            log_d("WakeWord detected!"); 
             start_recording();
             start_playing(beep_wake);
             break;
         case SR_EVENT_WAKEWORD_CHANNEL:
-            log_d("WakeWord Channel %d Verified!", command_id);
+            log_i("WakeWord channel %d verified!", command_id);
             ESP_SR.setMode(SR_MODE_COMMAND);  // Switch to Command detection
             setState(stDetected);
             break;
         case SR_EVENT_TIMEOUT:
-            log_w(RED_ERROR "Timeout Detected!"); 
+            log_w(RED_ERROR "Timeout detected!"); 
             stop_recording();
             stats.n_cmds_err++;
             start_playing(beep_error);
@@ -1689,7 +1696,7 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
             setState(stCommandError);
             break;
         case SR_EVENT_COMMAND:
-            log_d("Command %d Detected!", command_id);
+            log_i("Command %d detected!", command_id);
             stop_recording();
             stats.n_cmds_ok++;
             reportCommand(command_id);
@@ -1699,7 +1706,7 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
             setState(stCommandOk);
             break;
         default: 
-            log_w(RED_ERROR "Unknown Event!");
+            log_w(RED_ERROR "Unknown event!");
             break;
     }
 }
@@ -2033,6 +2040,12 @@ void setup()
     //----- WiFi ---------------------------------------------------------------
     if (!setupWifi()) fail("Can't connect to WiFi");
 
+    //----- Syslog -------------------------------------------------------------
+#ifdef LOG_SERVER
+    init_syslog(LOG_SERVER);
+#endif
+    syslog_i("---------- Starting SYSLOG");
+
     //----- MQTT ---------------------------------------------------------------
     if (!initRhMQTT()) fail("can't connect to Rhasspy MQTT broker");
     if (!initInfoMqtt()) fail("can't connect to OpenHAB MQTT broker");
@@ -2053,6 +2066,7 @@ void setup()
     setupOTA(DebugSerial); 
 	ArduinoOTA.onStart([]() {
         ESP_SR.end();
+        setState(stOTA);
 	});
 
     publishDebugInfo();
@@ -2080,7 +2094,9 @@ void loop()
 
     // once per day or so, report memory status
     EVERY(INTERVAL_DEBUG_REPORT)
-        ohMqttClient.publish("debug",myDebugReport(),true);
+        String json(myDebugReport());
+        ohMqttClient.publish("debug",json.c_str(),true);
+        syslog_i("%s",json.c_str());
     END_EVERY
 
     if (opt_realtime_stats) {

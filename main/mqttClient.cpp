@@ -30,7 +30,7 @@
 
 #include "mqttClient.h"
 #include "ansi.h"
-
+#include "rsyslog.h"
 
 #define TAG ANSI_CYAN ANSI_BOLD "MQTT " ANSI_RESET
 
@@ -54,12 +54,14 @@ void SimpleMqttClientESP::_on_event(void *handler_args, esp_event_base_t base, i
     switch ((esp_mqtt_event_id_t)event_id)
     {
     case MQTT_EVENT_CONNECTED:
-        log_d(TAG "MQTT_EVENT_CONNECTED");
+        log_i(TAG "MQTT_EVENT_CONNECTED");
+        syslog_i("MQTT: connected to broker '%s'", theClient->_broker);
         theClient->_connected=true;
         theClient->do_subscribe();
         break;
     case MQTT_EVENT_DISCONNECTED:
         log_w(TAG ANSI_RED "MQTT_EVENT_DISCONNECTED" ANSI_RESET);
+        syslog_w("MQTT disconnected");
         theClient->_connected=false;
         break;
     case MQTT_EVENT_SUBSCRIBED:
@@ -103,13 +105,14 @@ bool SimpleMqttClientESP::begin( const char* pubTopic )
 
     String clientId = String(WiFi.getHostname())+"_"+String(++_clientNo);
     esp_mqtt_client_config_t mqtt_cfg = {};
+    mqtt_cfg.session.keepalive = 600;
     mqtt_cfg.credentials.client_id = clientId.c_str();
     mqtt_cfg.broker.address.hostname = _broker;
     mqtt_cfg.broker.address.port = 1883;
     mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
     mqtt_cfg.buffer.size = 2048u;
     mqtt_cfg.buffer.out_size = 512u;
-    mqtt_cfg.task = { .stack_size = 4 * 1024, };
+    mqtt_cfg.task = { .stack_size = 6 * 1024, };
     bool ok=true;
     _client = esp_mqtt_client_init(&mqtt_cfg);
     ok = ok && (_client!=nullptr);
@@ -183,7 +186,7 @@ void SimpleMqttClientESP::_on_receive(
         /* multipart messages are assumed to be non-string, so don't print the message,
         and don't 0-terminate it  */
         log_d( TAG "receiving large message\n  topic='" ANSI_BLUE "%s" ANSI_RESET,
-            topic_buf );
+            sTopic.c_str() );
         if (cb) cb(sSubtopic.c_str(),(char*)payload,length,total_length);
         _multipart_cb = cb;
     } else {
@@ -216,31 +219,30 @@ void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
 {
     String topic(subscribeTopic);
     topic.replace("${HOSTNAME}",WiFi.getHostname());
+    if (topic.endsWith("/")) topic += "#";
     String prefix = topic;
     while (prefix.endsWith("+")) prefix.remove(prefix.length()-1);
     while (prefix.endsWith("#")) prefix.remove(prefix.length()-1);
-    if (topic.endsWith("/")) topic += "#";
 
-    subscription_t sub = { .prefix=prefix, .callback=cb };
+    subscription_t sub = { .prefix=prefix, .topic=topic, .callback=cb };
     _subscriptions.push_back(sub);
 
-    if (isConnected()) {
-        esp_mqtt_client_subscribe_single(_client, topic.c_str(), 0);
-        log_i(TAG "subscribe %d at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
-            _subscriptions.size(),
-            _broker,
-            topic.c_str());
-    }
 }
 
 
 void SimpleMqttClientESP::do_subscribe()
 {
     for (auto sub : _subscriptions) {
-        esp_mqtt_client_subscribe_single(_client, sub.prefix.c_str(), 0);
-        log_i(TAG "subscribe at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
+        int res = esp_mqtt_client_subscribe_single(_client, sub.topic.c_str(), 0);
+        log_i(TAG "subscribe at '%s', return=%d, topic=\n '" ANSI_BLUE "%s" ANSI_RESET "'",
             _broker,
-            sub.prefix.c_str());
+            res,
+            sub.topic.c_str());
+        syslog_i("subscribe at '%s' to '%s' is %d.",
+            _broker,
+            sub.topic.c_str(),
+            res
+        );
     }
 }
 
@@ -249,7 +251,7 @@ void SimpleMqttClientESP::do_subscribe()
  * @brief Publish a message to MQTT broker
  * 
  * @param topic       first part of topic for publishing. May contain "$(HOSTNAME)", 
- *                      which will be replace by WiFi hostname
+ *                      which will be replaced by WiFi hostname
  * @param subtopic    second part of topic for publishing, may be NULL
  * @param payload     message payload, 0-terminated
  * @param retain      if true, message is retained by broker 

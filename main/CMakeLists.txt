@@ -8,5 +8,6 @@ idf_component_register(
         "SimpleOTA.cpp"
         "SimpleReports.cpp"
         "StatusLED.cpp" 
+        "rsyslog.cpp"
     INCLUDE_DIRS ""
 )

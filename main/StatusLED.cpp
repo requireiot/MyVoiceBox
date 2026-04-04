@@ -63,7 +63,7 @@ void StatusLED::init()
     digitalWrite(_pinR,HIGH);
     digitalWrite(_pinG,HIGH);
     digitalWrite(_pinB,HIGH);
-    ledcSetClockSource(LEDC_AUTO_CLK);
+    //ledcSetClockSource(LEDC_AUTO_CLK);
     ledcAttach(_pinA,400,12);
 }
 
