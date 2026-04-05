@@ -1,7 +1,7 @@
 /**
  * @file        main.cpp
  * @project     MyVoiceBox
- * @author      Bernd Waldmann (you@domain.com)
+ * @author      Bernd Waldmann 
  * @date        2025-10-06
  * tabsize  4
  * 
@@ -50,10 +50,10 @@
 #include "mqttClient.h"
 #include "SimpleOTA.h"
 #include "SimpleReports.h"
+#include "rsyslog.h"
 #if HAS_RGB_LED
  #include "StatusLED.h"
 #endif
-#include "rsyslog.h"
 
 //----- project-specific headers
 #include "myauth.h"
@@ -107,7 +107,6 @@ const char VERSION[] =
 #define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_32BIT     // what the hardware interface produces
 
 #define i2s_RX_BITS     16                                 // what the library delivers
-
 
 #if (i2s_RX_BITS == 32)
  #define RX_TRANSFORM    I2S_RX_TRANSFORM_NONE
@@ -238,7 +237,7 @@ time_t bootTime;
  StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
 #endif 
 
-String sessionId;   // remember the uuid from the MQTT message /hermes/audioServer/$(HOSTNAME)/playBytes/
+String sessionId;   // remember uuid from MQTT message /hermes/audioServer/$(HOSTNAME)/playBytes/
 
 SR_Commands srCommands;
 
@@ -252,21 +251,20 @@ tx_raw_t tx_buf[TX_BUFLEN * TX_NCHANNELS];
 
 //----- RX buffer for entire recording, in mono 16 bits for a WAV file
 wav_buffer_t voice;
-size_t   voice_samples; // number of valid samples in voice buffer
+size_t   voice_samples;     // number of valid samples in voice buffer
 
 wav_buffer_t wav;           // waveform received via MQTT
-char* wav_byte_ptr;     // byte-wise pointer into wav.buf during collection
-unsigned wav_sample_rate;   // sample rate of the WAV file being collected
+char* wav_byte_ptr;         // byte-wise pointer into wav.buf during collection
 
 wav_buffer_t beep_hello;
 wav_buffer_t beep_wake;
 wav_buffer_t beep_error;
 
 //----- state indicators, may be set by one task and read by another
-volatile bool hasRecord = false;    ///< voice recording complete, ready to be written to FTP
-volatile bool isRecording = false;  ///< is currently recording voice from mic or SR input
-volatile bool isPlaying = false;    ///< is currently playing a WAV file from memory
-volatile bool isCollecting = false; ///< is currently receiving a WAV file via MQTT
+volatile bool hasRecord = false;    // voice recording complete, ready to be written to FTP
+volatile bool isRecording = false;  // is currently recording voice from mic or SR input
+volatile bool isPlaying = false;    // is currently playing a WAV file from memory
+volatile bool isCollecting = false; // is currently receiving a WAV file via MQTT
 
 volatile state_t state = stIdle;
 volatile unsigned long t_statechanged=0;
@@ -288,6 +286,10 @@ String HTML_lastModified("FFS");
 
 bool opt_realtime_stats = false;
 
+/**
+ * @brief Collection of statistics counters
+ * 
+ */
 struct stats_t {
     unsigned n_cmds_ok;
     unsigned n_cmds_err;
@@ -297,10 +299,15 @@ struct stats_t {
 } stats;
 
 
+/**
+ * @brief Collection of operating configuration parameters,
+ * can be shown on web page, and modified via MQTT
+ * 
+ */
 struct config_t {
     unsigned checksum;
-    bool opt_playback;
-    bool opt_savewave;
+    bool opt_playback;  // play back every command that is recorded
+    bool opt_savewave;  // upload to a server each command that is recorded
     int gain_mqtt;      // gain/attenuation for incoming WAV files, in steps of 6 dB
     int gain_beep;      // gain/attenuation for beeps from flash, in steps of 6 dB
     int gain_mic;       // gain/attenuation for raw mic signal, in steps of 6 dB
@@ -321,18 +328,22 @@ struct config_t {
 
 
 config_t default_config = {
-    .opt_playback = false,
-    .opt_savewave = false,
-    .gain_mqtt = -1,
-    .gain_beep = -1,
-    .gain_mic  =  3,
-    .gain_mic_play = -3,
+    .opt_playback = false,  // do not play back each voice command
+    .opt_savewave = false,  // do not upload to server each voice command
+    .gain_mqtt = -1,        // -6 dB attenuation for each WAV playback
+    .gain_beep = -1,        // -6 dB attenuation for each WAV jingle
+    .gain_mic  =  3,        // +18 dB gain for microphone signal
+    .gain_mic_play = -3,    // -18 dB attenuation for microphone signal while WAV is playing
 };
 
 
 RTC_DATA_ATTR config_t config;
 
 
+/**
+ * @brief Collection of function pointers for conversion to/from HTML and JSON
+ * 
+ */
 struct conv_t {
     String (*toWebString)();
     void (*toValue)(const AsyncWebParameter* wp);
@@ -357,7 +368,7 @@ template<typename T> void from_json(const char* label, JsonDocument& doc, T &val
 
 
 /**
- * @brief For each config item, define how to convert to/from web page
+ * @brief For each config item, define how to convert to/from web page and JSON struct
  * Template names are uppercase like %PLAYBACK%
  * parameter names in HTTP request are lowercase, like http://host/set?playback=OFF
  * 
@@ -456,6 +467,11 @@ const std::map<const std::string, conv_t> config_mapper = {
 };
 
 
+/**
+ * @brief Convert collection of operating configuration parameters to a JSON string
+ * 
+ * @return const char*   pointer to JSON string
+ */
 const char* config_to_json()
 {
     JsonDocument doc;
@@ -470,6 +486,12 @@ const char* config_to_json()
 }
 
 
+/**
+ * @brief Parse JSON string into operating configuration parameters.
+ * It is ok for the string to only contain a few parameters, not all
+ * 
+ * @param json 
+ */
 void json_to_config( const char* json )
 {
     JsonDocument doc;
@@ -515,6 +537,13 @@ void json_to_config( const char* json )
     } while(0)
 
 
+/*
+    to execute a code segment in loop() at set time intervals 
+    (less than each cyle through loop()), bracket them in EVERY ... END_EVERY, e.g.
+    EVERY( 5 MINUTES )
+        log_i("another 5 minutes have passed");
+    END_EVERY
+ */
 #define EVERY(ms)   {                                           \
     static unsigned long __last=0;                                \
     if ((__last==0) || (unsigned long)(millis()-__last) > (ms)) {   \
@@ -522,6 +551,11 @@ void json_to_config( const char* json )
 #define END_EVERY } }
 
 
+/*
+    to track the amount of heap space (internal and PSRAM) consumed in a function, 
+    insert BEGIN_HEAP_TRACE at the start of the function, and 
+    insert END_HEAP_TRACE before the return from the function
+ */
 static long __freeheap;
 static long __freepsram;
 
@@ -811,6 +845,11 @@ void i2s_tx_task( void* userData )
 
 #if HAS_RGB_LED
 
+/**
+ * @brief Set LED color and blink pattern according to system state
+ * 
+ * @param state 
+ */
 void update_LED_mode( state_t state )
 {
     switch (state) {
@@ -867,6 +906,10 @@ void led_task( void* userData )
 }
 
 
+/**
+ * @brief Initialize RGB LED subsystem
+ * 
+ */
 void init_LED()
 {
     led_hello();
@@ -894,6 +937,10 @@ void setState( state_t new_state )
 }
 
 
+/**
+ * @brief Update LED color and pattern as needed, call this from loop()
+ * 
+ */
 void loopState()
 {
     if (((unsigned)(millis() - t_statechanged) > 3000) && (state >= stCommandOk))
@@ -901,6 +948,11 @@ void loopState()
 }
 
 
+/**
+ * @brief Start recording voice samples, so we can later play them back 
+ * or upload to a server
+ * 
+ */
 void start_recording()
 {
     voice.ptr = voice.buf;
@@ -998,6 +1050,15 @@ bool copy_buf_to_voice( rx_raw_t* data, size_t nbytes )
 }
 
 
+/**
+ * @brief Upload a recorded voice command to an FTP server, in WAV format
+ * 
+ * @param namebase  URL of WAV filename, date and time will be appended
+ * @param data      the voice samples (always mono)
+ * @param nsamples  number of voice samples
+ * @return true     upload successful
+ * @return false    problem with upload
+ */
 bool saveWave( const char* namebase, const int16_t* data, size_t nsamples )
 {
 #ifdef FTP_SERVER
@@ -1086,6 +1147,11 @@ static const char* mnname =
 #endif
 
 
+/**
+ * @brief Add info about speech recognition configuration to a JSON struct
+ * 
+ * @param doc   JSON struct that info will be added to
+ */
 void reportSRinfoJSON( JsonDocument& doc )
 {
     doc["wake"] = wwname;
@@ -1098,6 +1164,11 @@ void reportSRinfoJSON( JsonDocument& doc )
 }
 
 
+/**
+ * @brief Return info about speech recognition configuration as a JSON string
+ * 
+ * @return const char*  the JSON-formatted string
+ */
 const char* reportSRinfoString()
 {
     JsonDocument doc;
@@ -1107,6 +1178,11 @@ const char* reportSRinfoString()
 }
 
 
+/**
+ * @brief Print info about speech recognition configuration to <serial>
+ * 
+ * @param serial    the UART to print to
+ */
 void printSRinfo( Print& serial )
 {
     serial.printf(" I2S Audio: %d Hz, TX %d bits %s, RX %d/%d bits %s", 
@@ -1132,6 +1208,11 @@ void print_all_Environment( Print& serial )
 }
 
 
+/**
+ * @brief Return info about usage statistsics as a JSON string
+ * 
+ * @return const char* 
+ */
 const char* myDebugReport()
 {
     JsonDocument doc;
@@ -1347,6 +1428,15 @@ void collect_wav_bytes( const char* message, size_t length )
 void updateCommands();
 
 
+/**
+ * @brief Handle incoming MQTT messages from OpenHAB broker. 
+ * Note: this does not support multi-part messages
+ * 
+ * @param topic         subtopic of the message, beyond the base we subscribed to
+ * @param message       MQTT message, converted to a 0-terminated string if not multi-part
+ * @param length        length of this mesage chunk (for long multi-part messages)
+ * @param total_length  length of complete message (may be > length for mult-part messages)
+ */
 void onReceiveOh( 
     const char* topic, 
     const char* message, 
@@ -1367,6 +1457,11 @@ void onReceiveOh(
 }
 
 
+/**
+ * @brief Publish collection of info re software version, hardware and configuration,
+ * as several JSON-formatted strings
+ * 
+ */
 void publishDebugInfo()
 {
     ohMqttClient.publish("version",VERSION,true);
@@ -1377,6 +1472,12 @@ void publishDebugInfo()
 }
 
 
+/**
+ * @brief Connect to OpenHAB MQTT broker and subscribe to topics
+ * 
+ * @return true     Connection successful
+ * @return false    Some problem
+ */
 bool initInfoMqtt()
 {
     BEGIN_HEAP_TRACE();
@@ -1419,6 +1520,10 @@ const char hermes_playFinished[] = R"rawliteral({"id": "%s", "sessionId": "%s"})
 #define TOPIC_PLAYFINISHED "hermes/audioServer/${HOSTNAME}/playFinished"
 
 
+/**
+ * @brief Publish Rhasspy-style MQTT message to indicate  
+ * that playback of received WAV file is complete.
+ */
 void publishFinished()
 {
     if (sessionId.length() > 0) {
@@ -1430,12 +1535,21 @@ void publishFinished()
 }
 
 
+/**
+ * @brief Publish Rhasspy-style MQTT message to indicate  
+ * that wakeword has been detected
+ */
 void publishWakeword()
 {
     snprintf(msgbuf,sizeof(msgbuf),hermes_wakeword,WiFi.getHostname());
     rhMqttClient.publish(TOPIC_WAKEWORD_DETECTED,NULL,msgbuf);
 }
 
+
+/**
+ * @brief Publish Rhasspy-style MQTT message to indicate  
+ * that timeout has occured, and no voice command detected
+ */
 
 void publishTimeout()
 {
@@ -1445,7 +1559,8 @@ void publishTimeout()
 
 
 /**
- * @brief Publish a Rhasspy-esque JSON string with info about command `id`
+ * @brief Publish Rhasspy-style MQTT message 
+ * with JSON string with info about voice command that has been detected
  * 
  * @param id   command id, starts with 1
  */
@@ -1473,7 +1588,7 @@ void publish_command( int id )
 
 
 /**
- * @brief Process message received via MQTT
+ * @brief Handle incoming MQTT message from Rhasspy broker
  * 
  * @param topic     subtopic (0-terminated) or NULL for multi-part message
  * @param message   payload, 0-terminated unless it is part of a multi-part message
@@ -1527,7 +1642,7 @@ void onReceiveRh(
 
 
 /**
- * @brief Connect to MQTT broker and subscribe to topics
+ * @brief Connect to Rhasspy MQTT broker and subscribe to topics
  * 
  * @return true     everything ok
  * @return false    some error
@@ -1547,9 +1662,18 @@ bool initRhMQTT()
 #pragma region Download from HTTP server
 
 
+/**
+ * @brief Download something (command definitions or HTML code) from an HTTP server
+ * 
+ * @param url       URL of file on HTTP server
+ * @param content   downloaded text is returned in this String
+ * @param modified  file modification date reported by HTTP server
+ * 
+ * @return true     = successful download;
+ * @return false    = something went wrong
+ */
 static bool download_from_HTTP( const String& url, String& content, String& modified)
 {
-    //String s;
     HTTPClient httpClient;
     httpClient.begin( url );
     static const char* headerNames[] = { "Last-Modified" };
@@ -1567,6 +1691,17 @@ static bool download_from_HTTP( const String& url, String& content, String& modi
 }
 
 
+/**
+ * @brief Download a file from HTTP server, save it to FFS, and return content as a String
+ * 
+ * @param baseURL   URL of HTTP server, without the filename
+ * @param filename  name of file on HTTP server and in FFS
+ * @param content   downloaded text is returned in this String
+ * @param modified  file modification date reported by HTTP server
+ * 
+ * @return true     = successful download;
+ * @return false    = something went wrong
+ */
 bool download_and_store( const String& baseURL, const String& filename, String& content, String& modified )
 {
     if (download_from_HTTP( baseURL+filename, content, modified)) {
