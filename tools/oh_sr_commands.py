@@ -5,7 +5,7 @@
 # - a TXT file needed at build time when using Multinet7
 #
 
-# This Revision: $Id: oh_sr_commands.py 1967 2026-04-04 17:23:10Z  $
+# This Revision: $Id: oh_sr_commands.py 1969 2026-04-14 10:00:00Z  $
 
 #
 #   Copyright (C) 2025 Bernd Waldmann
@@ -202,22 +202,6 @@ def english_g2p():
             for cat in ["low","medium","high","off"]:
                 phrase = f"dim {friendly_name} to {cat}"
                 print_command(phrase,"dim",itemname,friendly_name,f"{cat}")
-
-    # timer commands
-    if (0):
-    #for timer_name in ['red','green','blue']:
-        phrase = f"start {timer_name} timer"
-        print_command(phrase,"start",timer_name,timer_name,"")
-        phrase = f"stop {timer_name} timer"
-        print_command(phrase,"stop",timer_name,timer_name,"")
-
-    # number sub-commands
-    if (0):
-    #for i in range(1,61):
-        friendly_name = f"{i}" #num2words(i)
-        phrase = "expire in " + friendly_name + " ticks"
-        print_command(phrase,"minutes","minutes",friendly_name,str(i))
-        print(phrase)
 
     with open("../managed_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt","w") as f:
         f.write(out_txt)

@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1967 2026-04-04 17:23:10Z  $
+ * This Revision: $Id: main.cpp 1969 2026-04-14 10:00:00Z  $
  */
 
 /*
@@ -61,7 +61,7 @@
 #include "uploadWAV.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1967 2026-04-04 17:23:10Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1969 2026-04-14 10:00:00Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -1277,6 +1277,8 @@ static bool start_NTP()
 }
 
 
+unsigned nWifiConnect = 0;
+
 void onWiFiEvent(WiFiEvent_t event) 
 {
 	switch (event) {
@@ -1288,6 +1290,7 @@ void onWiFiEvent(WiFiEvent_t event)
 		
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
 		log_i( IF_NAME ANSI_BRIGHT_GREEN "connected" ANSI_RESET );
+        nWifiConnect++;
 		break;
 		
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
@@ -1362,6 +1365,36 @@ bool loopWifi()
     return WiFi.isConnected();
 }
 
+
+/**
+ * @brief Add Wifi performance parameters to JSON report
+ * 
+ * @param doc  reference to JSON object to add to
+ */
+void reportWifi( JsonDocument& doc )
+{
+    int dBm = WiFi.RSSI();        // in dBm
+    int quality;
+    if (dBm <= -100) {
+        quality = 0;
+    } else if (dBm >= -50) {
+        quality = 100;
+    } else {
+        quality = 2 * (dBm + 100);    
+    }
+
+    doc["RSSI"] = quality;
+    doc["nConnect"] = nWifiConnect;
+}
+
+
+const char* reportWifiString()
+{
+    JsonDocument doc;
+    reportWifi(doc);
+    serializeJson(doc,msgbuf,sizeof(msgbuf));
+    return msgbuf;
+}
 
 #pragma endregion
 //==============================================================================
@@ -1469,6 +1502,7 @@ void publishDebugInfo()
     ohMqttClient.publish("sr",reportSRinfoString(),true);
     ohMqttClient.publish("config",config_to_json(),true);
     ohMqttClient.publish("debug",reportMemoryInfoString(),true);
+    ohMqttClient.publish("wifi",reportWifiString(),true);
 }
 
 

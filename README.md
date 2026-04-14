@@ -207,7 +207,7 @@ These help to address issues like: is there too much echo from the room? is the 
 
 The MyVoiceBox device simulates a Rhasspy satellite to the extent necessary for working with my OpenHAB installation, so I had to do a bit of reseearch on how Rhasspy communicates with its satellites.
 
-To create audio output on the satellite, Rhasspy publishes am MQTT message to `hermes/audioServer/<siteId>/playBytes/<sessionId>`. A message to my satellite named `esp32s3-56BCF4` would go to a topic like `hermes/audioServer/esp32s3-56BCF4/playBytes/226f9057-1360-4927-a786-8fcf8d6a997b`. The payload of the message is the complete WAV file to be played.
+To create audio output on the satellite, Rhasspy publishes am MQTT message to `hermes/audioServer/<siteId>/playBytes/<sessionId>`. A message to my satellite named `esp32s3-56BCF4` would go to a topic like `hermes/audioServer/esp32s3-56BCF4/playBytes/226f9057-1360-4927-a786-8fcf8d6a997b`. The payload of the message is the complete WAV file to be played, and may be sent in multiple chunks, as a multi-part MQTT message.
 
 When the satellite has finished playing back the WAV file, it will publish a message to `hermes/audioServer/<siteId>/playFinished`. The payload is a JSON formatted string that contains the sessionId from the previous message. So my satellite would respond to the example message above with a payload of `{"id": "226f9057-1360-4927-a786-8fcf8d6a997b", "sessionId": "226f9057-1360-4927-a786-8fcf8d6a997b"}`.
 
