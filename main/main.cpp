@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1969 2026-04-14 10:00:00Z  $
+ * This Revision: $Id: main.cpp 1970 2026-05-02 08:41:31Z  $
  */
 
 /*
@@ -61,7 +61,7 @@
 #include "uploadWAV.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1969 2026-04-14 10:00:00Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBox $Id: main.cpp 1970 2026-05-02 08:41:31Z  $ built "  __DATE__ " " __TIME__;
 
 //==============================================================================
 #pragma region Hardware configuration
@@ -1243,9 +1243,10 @@ const char* myDebugReport()
 
 static void print_NTP_servers(void)
 {
+    const char* ntp_servername;
     for (uint8_t i = 0; i < SNTP_MAX_SERVERS; ++i){
-        if (esp_sntp_getservername(i)){
-            log_i(IF_NAME "NTP server %d: %s", i, esp_sntp_getservername(i));
+        if ((ntp_servername=esp_sntp_getservername(i))){
+            log_i(IF_NAME "NTP server %d: %s", i, ntp_servername);
         } else {
             // we have either IPv4 or IPv6 address, let's print it
             char buff[IP4ADDR_STRLEN_MAX];
@@ -1432,8 +1433,9 @@ void stop_collecting()
     isCollecting = false;
     wav.end = (int16_t*) wav_byte_ptr;
     unsigned nsamples = (unsigned)(wav.end - wav.buf);
-    log_i("WAV file complete, %u samples, %s",
-        nsamples, calc_min_max( wav.buf, nsamples ));
+    const char* minmax = calc_min_max( wav.buf, nsamples );
+    log_i("WAV file complete, %u samples, %s", nsamples, minmax );
+    syslog_i("WAV file complete, %u samples, %s", nsamples, minmax );
     if (config.gain_mqtt)
         amplify( wav.buf, nsamples, config.gain_mqtt );
     start_playing( wav );
