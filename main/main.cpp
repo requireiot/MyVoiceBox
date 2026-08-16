@@ -1,11 +1,11 @@
 /**
  * @file        main.cpp
  * @project     MyVoiceBox
- * @author      Bernd Waldmann 
+ * @author      Bernd Waldmann (you@domain.com)
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: main.cpp 1970 2026-05-02 08:41:31Z  $
+ * This Revision: $Id: main.cpp 2015 2026-08-16 18:04:56Z  $
  */
 
 /*
@@ -21,14 +21,19 @@
 /**
  * @brief   Voice interaction satellite for OpenHAB, using ESP-SR 
  * built with ESP-IDF and Arduino-as-a-component
+ *
+ * This branch supports multiple hardware variants, namely
+ * - ESP32-S3-BOX-Lite with 2x mic, 1x speaker, 320x240 LCD 
+ * - homebrew with 2x INMP441 mic, 1x MAX98357A speaker, optional 320x240 LCD 
+ * - Spotpear Muma with 1x mic, 1x speaker, 240x240 LCD
  */
 
-// set to 1 if we have a common-anode RGB LED attached to GPIO pins  
-#define HAS_RGB_LED 1
-// set 1 to have a web interface
-#define USE_WEBSERVER 1   
-
 #include "sdkconfig.h"
+#include "prefs.h"
+
+#if !(USE_CUSTOM_BOARD) && !(USE_ESP_BOX_LITE) && !(USE_MUMA)
+ #pragma message "You need to define either USE_CUSTOM_BOARD or USE_ESP_BOX or USE_MUMA to 1"
+#endif
 
 //----- standard C and C++ headers
 #include <map>
@@ -42,90 +47,36 @@
 #include <LittleFS.h>           // Apache license
 #include "wav_header.h"         // part of Arduino ESP_I2S
 #include <ESP_I2S.h>
-#include <ESP_SRx.h>
-#define ESP_SR ESP_SRx
+
+#if HAS_DISPLAY
+  #include "esp_lvgl_port.h" 
+#endif
+
 //----- my own reusable headers
 #include "ansi.h"
 #include "rt_stats.h"
-#include "mqttClient.h"
+#include "SimpleMqttClientESP.h"
 #include "SimpleOTA.h"
 #include "SimpleReports.h"
-#include "rsyslog.h"
 #if HAS_RGB_LED
  #include "StatusLED.h"
 #endif
+#include "rsyslog.h"
 
 //----- project-specific headers
 #include "myauth.h"
+#include "pins.h"
+#include <ESP_SRx.h>
 #include "sr_commands.h"
 #include "uploadWAV.h"
+#if HAS_DISPLAY
+ #include "my_display.h"
+#endif
+#include "my_sensors.h"
 
 const char VERSION[] = 
-    "MyVoiceBox $Id: main.cpp 1970 2026-05-02 08:41:31Z  $ built "  __DATE__ " " __TIME__;
+    "MyVoiceBoxNew $Id: main.cpp 2015 2026-08-16 18:04:56Z  $ built "  __DATE__ " " __TIME__;
 
-//==============================================================================
-#pragma region Hardware configuration
-
-#define PIN_BUTTON  0   ///< use the 'BOOT' button on the devkit for simple user input
-
-#define PIN_LED_A   5   // common anode
-#define PIN_LED_R   4
-#define PIN_LED_G   6
-#define PIN_LED_B   7
-
-// Note: constants define here start with lower case 'i2s_' to distinguish them from
-// upper case 'I2S_' constants defined in ESP-IDF headers
-
-//----- GPIO pins
-
-#define i2s_TX_PORT     I2S_NUM_1
-#define i2s_TX_DOUT     40
-#define i2s_TX_BCK      39
-#define i2s_TX_LRCK     38
-
-#define i2s_RX_PORT     I2S_NUM_0
-#define i2s_RX_DIN      15
-#define i2s_RX_BCK      16
-#define i2s_RX_LRCK     17
-
-//----- TX data format
-
-#define i2s_TX_STEREO 0
-#define i2s_TX_BITS         I2S_DATA_BIT_WIDTH_16BIT
-
-#if i2s_TX_STEREO
- #define i2s_TX_SLOTMODE     I2S_SLOT_MODE_STEREO
- #define TX_NCHANNELS   2
-#else
- #define i2s_TX_SLOTMODE     I2S_SLOT_MODE_MONO
- #define TX_NCHANNELS   1
-#endif
-
-//----- RX data format
-
-#define i2s_RX_STEREO 1
-#define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_32BIT     // what the hardware interface produces
-
-#define i2s_RX_BITS     16                                 // what the library delivers
-
-#if (i2s_RX_BITS == 32)
- #define RX_TRANSFORM    I2S_RX_TRANSFORM_NONE
-#else
- #define RX_TRANSFORM    I2S_RX_TRANSFORM_32_TO_16
-#endif
-
-#if i2s_RX_STEREO
- #define i2s_RX_SLOTMODE I2S_SLOT_MODE_STEREO                 
- #define i2s_RX_SLOTMASK I2S_STD_SLOT_BOTH
- #define RX_NCHANNELS    2
-#else
- #define i2s_RX_SLOTMODE I2S_SLOT_MODE_MONO                 
- #define i2s_RX_SLOTMASK I2S_STD_SLOT_LEFT
- #define RX_NCHANNELS    1
-#endif
-
-
-#pragma endregion
 //==============================================================================
 #pragma region Preferences
 
@@ -134,11 +85,10 @@ const char VERSION[] =
 
 // dimensions of TX buffer to feed to ESP-IDF, in samples
 #define TX_BUFLEN       1024
-
-#define VOICE_DURATION  5  // seconds
-
 // dimensions of RX buffer to feed to ESP-IDF, in samples
 #define RX_BUFLEN       1024
+
+#define VOICE_DURATION  5  // seconds
 
 //----- timing
 
@@ -150,10 +100,78 @@ const char VERSION[] =
 #define INTERVAL_DEBUG_REPORT       1 HOURS
 #define INTERVAL_REALTIME_STATS     15 SECONDS
 
+#define INTERVAL_PUBLISH_BME        10 MINUTES  // how often to publish BME280 readings to MQTT
+#define INTERVAL_PUBLISH_ENS        10 MINUTES  // how often to publish ENS160 readings to MQTT
+#define INTERVAL_DISPLAY_CLIMATE    5 MINUTES   // how often to read sensors and display on screen
+
 //----- MQTT preferences
+
+#define MQTT_SUB_WEATHER "haus/weather/"        // expect "haus/weather/temperature" etc
+#define MQTT_PUB_CLIMATE "haus/${HOSTNAME}/"    // publish to "haus/esp32s3-ABCDEF/temperature" etc
 
 #define MQTT_SUB_INFO_IN "haus/${HOSTNAME}/set/"
 #define MQTT_PUB_INFO    "haus/${HOSTNAME}/"
+
+
+#define GREEN_OK ANSI_BRIGHT_GREEN "OK " ANSI_RESET
+#define RED_ERROR ANSI_BRIGHT_RED "Error " ANSI_RESET
+
+#if USE_MUMA
+ #define DebugSerial Serial
+#else
+ #define DebugSerial Serial0
+#endif 
+
+
+#pragma endregion
+//==============================================================================
+#pragma region Hardware configuration
+
+
+// Note: constants define here start with lower case 'i2s_' to distinguish them from
+// upper case 'I2S_' constants defined in ESP-IDF headers
+
+#if USE_ESP_BOX_LITE
+ #define i2s_TX_STEREO 0
+ #define i2s_RX_STEREO 1
+ #define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_16BIT     // what the hardware interface produces
+#elif USE_MUMA
+ #define i2s_TX_STEREO 0
+ #define i2s_RX_STEREO 1
+ #define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_16BIT     // what the hardware interface produces
+#elif USE_CUSTOM_BOARD
+ #define i2s_TX_STEREO 0
+ #define i2s_RX_STEREO 1
+ #define i2s_RX_DATA_BIT_WIDTH I2S_DATA_BIT_WIDTH_16BIT     // what the hardware interface produces
+#else
+ #warning You must define USE_ESP_BOX_LITE or USE_MUMA or USE_CUSTOM_BOARD
+#endif
+
+#define i2s_TX_BITS     16
+#define i2s_RX_BITS     16                                  // what the library delivers
+
+#define RX_TRANSFORM    I2S_RX_TRANSFORM_NONE
+
+//----- conditional definitions
+
+#if i2s_RX_STEREO
+ #define i2s_RX_SLOTMODE I2S_SLOT_MODE_STEREO                 
+ #define i2s_RX_SLOTMASK I2S_STD_SLOT_BOTH
+ #define RX_NCHANNELS    2
+#else
+ #define i2s_RX_SLOTMODE I2S_SLOT_MODE_MONO                 
+ #define i2s_RX_SLOTMASK I2S_STD_SLOT_LEFT
+ #define RX_NCHANNELS    1
+#endif
+
+#if i2s_TX_STEREO
+ #define i2s_TX_SLOTMODE     I2S_SLOT_MODE_STEREO
+ #define TX_NCHANNELS   2
+#else
+ #define i2s_TX_SLOTMODE     I2S_SLOT_MODE_MONO
+ #define TX_NCHANNELS   1
+#endif
+
 
 #pragma endregion
 //==============================================================================
@@ -176,7 +194,6 @@ const char VERSION[] =
 
 /**
  * @brief Buffer for waveform, allocated in PSRAM
- * 
  */
 struct wav_buffer_t {
     int16_t* buf;           ///< points to start of buffer
@@ -199,8 +216,8 @@ struct wav_buffer_t {
 
 
 /**
- * @brief Wrapper class for I2SClass so we can mess with incoming audio stream
- * 
+ * @brief Wrapper class for I2SClass so we can fiddle with the 
+ * incoming audio stream before passing it on to ESP-SR engine
  */
 class MyRxI2SClass: public I2SClass {
 public:
@@ -209,14 +226,18 @@ public:
 };
 
 
+/**
+ * @brief Operational state of STT engine, can be indicated via LED or display
+ * 
+ */
 enum state_t { 
     stUnknown=-1,
-    stIdle=0, 
-    stDetected, 
-    stCommandOk, 
-    stCommandError,
-    stSystemError,
-    stOTA
+    stIdle=0,       ///< waiting for wakework
+    stDetected,     ///< wakeword detected, waiting for command
+    stCommandOk,    ///< successfully recognized command
+    stCommandError, ///< tineout before a command could be recognized
+    stSystemError,  ///< something in the system is fishy, can't continue
+    stOTA           ///< in the middle of over-the-air firmware upload
 };
 
 
@@ -224,47 +245,26 @@ enum state_t {
 //==============================================================================
 #pragma region Global variables
 
-#define GREEN_OK ANSI_BRIGHT_GREEN "OK " ANSI_RESET
-#define RED_ERROR ANSI_BRIGHT_RED "Error " ANSI_RESET
-
-#define DebugSerial Serial0
-
 char msgbuf[512];
 
 time_t bootTime;
 
-#if HAS_RGB_LED
- StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
-#endif 
+// quick hack to show min/max microphone signal on log output
+volatile unsigned nFrames=0;
+char frame_range_0[] = "[+99999..+99999]";
+char frame_range_1[] = "[+99999..+99999]";
 
-String sessionId;   // remember uuid from MQTT message /hermes/audioServer/$(HOSTNAME)/playBytes/
+/// remember uuid from MQTT message `/hermes/audioServer/$(HOSTNAME)/playBytes/`
+String sessionId;   
 
 SR_Commands srCommands;
 
-MyRxI2SClass rx_i2s;
-I2SClass tx_i2s;
-
-//----- I2S raw data buffers, these depend on the selected word size
-tx_raw_t tx_buf[TX_BUFLEN * TX_NCHANNELS];
-
-// all buffers below are always 16 bit mono, independent of I2S word size
-
-//----- RX buffer for entire recording, in mono 16 bits for a WAV file
-wav_buffer_t voice;
-size_t   voice_samples;     // number of valid samples in voice buffer
-
-wav_buffer_t wav;           // waveform received via MQTT
-char* wav_byte_ptr;         // byte-wise pointer into wav.buf during collection
-
-wav_buffer_t beep_hello;
-wav_buffer_t beep_wake;
-wav_buffer_t beep_error;
-
 //----- state indicators, may be set by one task and read by another
-volatile bool hasRecord = false;    // voice recording complete, ready to be written to FTP
-volatile bool isRecording = false;  // is currently recording voice from mic or SR input
-volatile bool isPlaying = false;    // is currently playing a WAV file from memory
-volatile bool isCollecting = false; // is currently receiving a WAV file via MQTT
+volatile bool hasRecord = false;    ///< voice recording complete, ready to be written to FTP
+volatile bool isRecording = false;  ///< is currently recording voice from mic or SR input
+volatile bool isPlaying = false;    ///< is currently playing a WAV file from memory
+volatile bool isCollecting = false; ///< is currently receiving a WAV file via MQTT
+bool isFirstRecord = true;
 
 volatile state_t state = stIdle;
 volatile unsigned long t_statechanged=0;
@@ -277,6 +277,51 @@ SimpleMqttClientESP ohMqttClient( MQTT_BROKER_OPENHAB );
  AsyncWebServer server(80);
 #endif
 
+//----- hardware abstraction
+#if HAS_RGB_LED
+ StatusLED rgbLED( PIN_LED_A, PIN_LED_R, PIN_LED_G, PIN_LED_B );
+#endif 
+
+#if USE_ESP_BOX_LITE
+ #include "EspBoard_Lite.h"
+ EspBoard_BoxLite board;
+ AudioCodec_BoxLite codec;
+#elif USE_MUMA
+ #include "EspBoard_Muma.h"
+ EspBoard_Muma board;
+ AudioCodec_Muma codec;
+#elif USE_CUSTOM_BOARD
+ #include "EspBoard_Custom.h"
+ #if HAS_DISPLAY
+  EspBoard_Custom_LCD board;
+ #else
+  EspBoard_Custom board;
+ #endif
+ AudioCodec_Direct codec;
+#endif
+
+//----- audio-related stuff
+MyRxI2SClass rx_i2s;
+
+//----- I2S raw data buffers, these depend on the selected word size
+tx_raw_t tx_buf[TX_BUFLEN * TX_NCHANNELS];
+//rx_raw_t rx_buf[RX_BUFLEN * RX_NCHANNELS];
+
+// all buffers below are always 16 bit mono, independent of I2S word size
+
+//----- RX buffer for entire recording, in mono 16 bits for a WAV file
+wav_buffer_t voice;
+size_t   voice_samples; // number of valid samples in voice buffer
+
+wav_buffer_t wav;           // waveform received via MQTT
+char* wav_byte_ptr;     // byte-wise pointer into wav.buf during collection
+unsigned wav_sample_rate;   // sample rate of the WAV file being collected
+
+//----- beeps read from FFS
+wav_buffer_t beep_hello;
+wav_buffer_t beep_wake;
+wav_buffer_t beep_error;
+
 #pragma endregion
 //==============================================================================
 #pragma region Configuration and Statistics
@@ -286,10 +331,6 @@ String HTML_lastModified("FFS");
 
 bool opt_realtime_stats = false;
 
-/**
- * @brief Collection of statistics counters
- * 
- */
 struct stats_t {
     unsigned n_cmds_ok;
     unsigned n_cmds_err;
@@ -299,20 +340,17 @@ struct stats_t {
 } stats;
 
 
-/**
- * @brief Collection of operating configuration parameters,
- * can be shown on web page, and modified via MQTT
- * 
- */
 struct config_t {
     unsigned checksum;
-    bool opt_playback;  // play back every command that is recorded
-    bool opt_savewave;  // upload to a server each command that is recorded
+    bool opt_playback;
+    bool opt_savewave;
     int gain_mqtt;      // gain/attenuation for incoming WAV files, in steps of 6 dB
     int gain_beep;      // gain/attenuation for beeps from flash, in steps of 6 dB
     int gain_mic;       // gain/attenuation for raw mic signal, in steps of 6 dB
     int gain_mic_play;  // gain/atten for raw mic signal, while playing beep
-
+#ifdef HAS_DISPLAY
+    unsigned brightness;
+#endif
     unsigned calc_checksum() {
         unsigned sum=0xDEADBEEF; 
         uint8_t* p= (uint8_t*)this + sizeof(checksum);
@@ -327,23 +365,30 @@ struct config_t {
 };
 
 
+#if USE_ESP_BOX_LITE
+ #define MIC_SHIFT 0    // see gain calculation is AudioCodec_Lite.cpp
+#elif USE_MUMA
+ #define MIC_SHIFT 0    // see gain calculation is AudioCodec_ES8311.cpp
+#elif USE_CUSTOM_BOARD
+ #define MIC_SHIFT 3    // see gain calculation is AudioCodec_Custom.cpp
+#endif
+
 config_t default_config = {
-    .opt_playback = false,  // do not play back each voice command
-    .opt_savewave = false,  // do not upload to server each voice command
-    .gain_mqtt = -1,        // -6 dB attenuation for each WAV playback
-    .gain_beep = -1,        // -6 dB attenuation for each WAV jingle
-    .gain_mic  =  3,        // +18 dB gain for microphone signal
-    .gain_mic_play = -3,    // -18 dB attenuation for microphone signal while WAV is playing
+    .opt_playback = false,
+    .opt_savewave = false,
+    .gain_mqtt = -1,
+    .gain_beep = -1,
+    .gain_mic  =  MIC_SHIFT,
+#ifdef HAS_DISPLAY
+    .gain_mic_play = -3,
+    .brightness = 20,
+#endif
 };
 
 
 RTC_DATA_ATTR config_t config;
 
 
-/**
- * @brief Collection of function pointers for conversion to/from HTML and JSON
- * 
- */
 struct conv_t {
     String (*toWebString)();
     void (*toValue)(const AsyncWebParameter* wp);
@@ -363,15 +408,21 @@ template<typename T> void from_json(const char* label, JsonDocument& doc, T &val
     T oldvalue = value;
     value = doc[label] | value; 
     if (value != oldvalue)
-        log_d("%s: %s -> %s", label, String(oldvalue).c_str(), String(value).c_str());
+        log_i("%s: %s -> %s", label, String(oldvalue).c_str(), String(value).c_str());
 }
 
 
 /**
- * @brief For each config item, define how to convert to/from web page and JSON struct
+ * @brief For each config item, define how to convert to/from web page and json
  * Template names are uppercase like %PLAYBACK%
  * parameter names in HTTP request are lowercase, like http://host/set?playback=OFF
+ * parameter names in JSON are lowercase
  * 
+ * Example: to set brightness to 50,
+ * - publish MQTT message on OpenHAB MQTT broker, 
+ *      token=haus/esp32s3-ABCDEF/set/config
+ *      message = '{ "brightness": 30 }'
+ * - send HTTP request to http://esp32s3-ABCDEF/set?brightness=50
  */
 const std::map<const std::string, conv_t> config_mapper = {
     { "playback", {
@@ -416,6 +467,20 @@ const std::map<const std::string, conv_t> config_mapper = {
         [](const char* label, JsonDocument& doc) { to_json(label,doc,opt_realtime_stats); },
         [](const char* label, JsonDocument& doc) { from_json(label,doc,opt_realtime_stats); }
     }},
+#if HAS_DISPLAY
+    { "brightness", {
+        []() { return String( config.brightness); },
+        [](const AsyncWebParameter* wp) { 
+            config.brightness = wp->value().toInt(); 
+            board.set_brightness(config.brightness);
+        },
+        [](const char* label, JsonDocument& doc) { to_json(label,doc,config.brightness); },
+        [](const char* label, JsonDocument& doc) { 
+            from_json(label,doc,config.brightness); 
+            board.set_brightness(config.brightness);
+        }
+    }},
+#endif
     { "ncmdsok", {
         []() { return String( stats.n_cmds_ok ); },
         NULL,
@@ -467,11 +532,6 @@ const std::map<const std::string, conv_t> config_mapper = {
 };
 
 
-/**
- * @brief Convert collection of operating configuration parameters to a JSON string
- * 
- * @return const char*   pointer to JSON string
- */
 const char* config_to_json()
 {
     JsonDocument doc;
@@ -486,12 +546,6 @@ const char* config_to_json()
 }
 
 
-/**
- * @brief Parse JSON string into operating configuration parameters.
- * It is ok for the string to only contain a few parameters, not all
- * 
- * @param json 
- */
 void json_to_config( const char* json )
 {
     JsonDocument doc;
@@ -508,7 +562,6 @@ void json_to_config( const char* json )
 #pragma endregion
 //==============================================================================
 #pragma region Little helpers
-
 
 #define ON_ERROR_RETURN_FALSE(x)  do {          \
         esp_err_t err;                          \
@@ -537,13 +590,6 @@ void json_to_config( const char* json )
     } while(0)
 
 
-/*
-    to execute a code segment in loop() at set time intervals 
-    (less than each cyle through loop()), bracket them in EVERY ... END_EVERY, e.g.
-    EVERY( 5 MINUTES )
-        log_i("another 5 minutes have passed");
-    END_EVERY
- */
 #define EVERY(ms)   {                                           \
     static unsigned long __last=0;                                \
     if ((__last==0) || (unsigned long)(millis()-__last) > (ms)) {   \
@@ -551,19 +597,23 @@ void json_to_config( const char* json )
 #define END_EVERY } }
 
 
-/*
-    to track the amount of heap space (internal and PSRAM) consumed in a function, 
-    insert BEGIN_HEAP_TRACE at the start of the function, and 
-    insert END_HEAP_TRACE before the return from the function
- */
 static long __freeheap;
 static long __freepsram;
 
+/**
+ * @brief Call this at the start of a function where you want to track heap consumption
+ * 
+ */
 void BEGIN_HEAP_TRACE() {
     __freeheap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);  
     __freepsram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); 
 } 
 
+/**
+ * @brief Call this at the end of a function where you want to track heap consumption
+ * 
+ * @param func  name of function, will be printed before statistics
+ */
 void __end_heap_trace(const char* func) 
 {
     long new_heap = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -593,15 +643,6 @@ void __end_heap_trace(const char* func)
 bool init_FS() 
 {
     return LittleFS.begin(false,"/littlefs",10,"littlefs");
-/*
-    esp_vfs_littlefs_conf_t conf = {
-        .base_path = "/littlefs",
-        .partition_label = "littlefs",
-        .format_if_mount_failed = false,
-        .dont_mount = false,
-    };
-    return ESP_OK==esp_vfs_littlefs_register(&conf);
-*/
 }
 
 
@@ -613,13 +654,13 @@ bool init_FS()
  * @return  const char* formatted like '[min..max]'
  */
 template<typename T>
-const char* calc_min_max( const T* data, size_t nsamples )
+const char* calc_min_max( const T* data, size_t nsamples, size_t stride=1 )
 {
     T dmin=INT16_MAX, dmax=INT16_MIN;
     while (nsamples--) {
         if (dmin > *data) dmin = *data;
         if (dmax < *data) dmax = *data;
-        data++;
+        data += stride;
     }
     static char s[40];
     snprintf( s, sizeof s, "[%6ld..%6ld]", (long)dmin, (long)dmax);
@@ -671,80 +712,8 @@ String formatUptime( time_t uptime )
     seconds -= minutes * 60;
     // like "999d 23:59"
     snprintf( buf, sizeof buf, "%dd %d:%02d", days, hours, minutes );
-    log_i("Uptime is %s",buf);
+    //log_i("Uptime is %s",buf);
     return String(buf);
-}
-
-
-#pragma endregion
-//==============================================================================
-#pragma region I2S transmit (using Arduino library)
-
-
-bool i2s_tx_initialize() 
-{
-    tx_i2s.setPins( i2s_TX_BCK, i2s_TX_LRCK, i2s_TX_DOUT);
-    bool ok = tx_i2s.begin( I2S_MODE_STD, SAMPLE_RATE, i2s_TX_BITS, i2s_TX_SLOTMODE );
-    log_i(GREEN_OK "Init I2S Tx" );
-    tx_i2s.setTimeout( 1000 * TX_BUFLEN / SAMPLE_RATE + 10 );
-    return ok;
-}
-
-
-bool i2s_tx_set_sample_rate( unsigned sample_rate )
-{
-    log_d("Set I2S TX sample rate to %u Hz", sample_rate);
-    return tx_i2s.configureTX( sample_rate, i2s_TX_BITS, i2s_TX_SLOTMODE );
-}
-
-
-bool i2s_tx_write( tx_raw_t* data, size_t bytes_to_write )
-{
-    size_t bytes_written = tx_i2s.write((uint8_t*)data, bytes_to_write);
-    if (bytes_written != bytes_to_write) {
-        log_e(RED_ERROR "i2s write failed, expected %u, got %u",
-            bytes_to_write, bytes_written);
-        return false;
-    }
-    return true;
-}
-
-
-/**
- * @brief initialize I2S interface for receiving from microphone(s)
- * 
- * @return true     init worked
- * @return false    some error
- */
-bool i2s_rx_initialize() 
-{
-    rx_i2s.setPins( i2s_RX_BCK, i2s_RX_LRCK, -1, i2s_RX_DIN );
-    rx_i2s.setTimeout(1000);
-
-    bool ok = rx_i2s.begin( 
-                    I2S_MODE_STD, 
-                    SAMPLE_RATE, 
-                    i2s_RX_DATA_BIT_WIDTH, 
-                    i2s_RX_SLOTMODE, 
-                    i2s_RX_SLOTMASK 
-                );
-    // this always sets .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(...)
-    if (ok) log_i(GREEN_OK "Init I2S Rx");
-
-    ok = rx_i2s.configureRX(SAMPLE_RATE, i2s_RX_DATA_BIT_WIDTH, i2s_RX_SLOTMODE, RX_TRANSFORM);
-    if (ok) log_i(GREEN_OK "config I2S Rx");
-
-    rx_i2s.setTimeout( 1000 * RX_BUFLEN / SAMPLE_RATE + 10 );
-
-    return ok;
-}
-
-
-bool i2s_rx_tx_initialize()
-{
-    return
-        i2s_tx_initialize() &&
-        i2s_rx_initialize();
 }
 
 
@@ -753,27 +722,26 @@ bool i2s_rx_tx_initialize()
 #pragma region I2S TX task, play buffers
 
 
-int16_t* play_buf;
-int16_t* play_end;
-int16_t* play_ptr;
+static int16_t* play_buf;
+static int16_t* play_end;
+static int16_t* play_ptr;
 
 
-void start_playing( int16_t* buf, int16_t* end, unsigned samplerate = SAMPLE_RATE )
+void start_playing( int16_t* buf, int16_t* end )
 {
-    i2s_tx_set_sample_rate( samplerate );
     play_buf = buf;
     play_ptr = buf;
     play_end = end;
     isPlaying = true;
     unsigned nsamples = play_end - play_buf;
     log_i("start playing, %u samples (%u s) %s", 
-        nsamples, (unsigned) nsamples / samplerate, calc_min_max(buf,nsamples) );
+        nsamples, (unsigned) nsamples / SAMPLE_RATE, calc_min_max(buf,nsamples) );
 }
 
 
 void start_playing( wav_buffer_t& wv ) 
 {
-    start_playing( wv.buf, wv.end, wv.samplerate );
+    start_playing( wv.buf, wv.end );
 }
 
 
@@ -822,7 +790,7 @@ bool fill_tx_buffer_from_play( tx_raw_t* data, size_t nsamples )
  */
 void i2s_tx_task( void* userData )
 {
-    size_t bytes_to_write = TX_BUFLEN * TX_NCHANNELS * sizeof(tx_raw_t);
+    //size_t bytes_to_write = TX_BUFLEN * TX_NCHANNELS * sizeof(tx_raw_t);
 
     while (1) {
         if (isPlaying) {
@@ -832,7 +800,7 @@ void i2s_tx_task( void* userData )
             memset( tx_buf, 0, sizeof tx_buf );
         }
         // Write i2s data
-        i2s_tx_write( tx_buf, bytes_to_write );
+        codec.audio_write( tx_buf, TX_BUFLEN );
         vTaskDelay(1);
     }
 }
@@ -840,17 +808,250 @@ void i2s_tx_task( void* userData )
 
 #pragma endregion
 //==============================================================================
-#pragma region RGB LED stuff
+#pragma region LCD display (optional)
+#if HAS_DISPLAY
 
 
-#if HAS_RGB_LED
+static lv_color_t color_Idle        = lv_color_hex(0x000000);   // Blue
+static lv_color_t color_Detected    = lv_color_hex(0xFFFF00);   // Yellow
+static lv_color_t color_Command     = lv_color_hex(0x00FF00);   // Green
+static lv_color_t color_Error       = lv_color_hex(0xFF0000);   // Red
+static lv_color_t color_OTA         = lv_color_hex(0xFF00FF);   // Purple
+
 
 /**
- * @brief Set LED color and blink pattern according to system state
+ * @brief Change frame color on the LCD display to indicate state 
  * 
  * @param state 
  */
-void update_LED_mode( state_t state )
+void show_state_on_display( state_t state )
+{
+    switch (state) {
+        case stIdle:        
+            display_update_frame_color( color_Idle );
+            break; 
+        case stDetected:    
+            display_update_frame_color( color_Detected );
+            break; 
+        case stCommandOk:   
+            display_update_frame_color( color_Command );
+            break; 
+        case stCommandError:  
+            display_update_frame_color( color_Error );
+            break; 
+        case stSystemError:
+            display_update_frame_color( color_Error );
+            break;
+        case stOTA:
+            display_update_frame_color( color_OTA );
+            break;
+        default: 
+            break;
+    }    
+}
+
+#else
+ void show_state_on_display( state_t state ) {}
+#endif // HAS_DISPLAY
+#pragma endregion
+//==============================================================================
+#pragma region Climate sensors (optional)
+
+
+bool hasBME = false;
+bool hasAHT = false;
+bool hasENS = false;
+
+volatile unsigned ext_refresh = 0;
+volatile unsigned int_refresh = 0;
+volatile unsigned aqi_refresh = 0;
+
+
+// climate data 
+static float owmT, owmH, owmP;      // received from OpenWeatherMap, via MQTT
+
+
+#if HAS_SENSORS
+
+
+static float bmeT, bmeH, bmeP;      // received from BME280 sensor
+static float ahtT, ahtH;            // received from AHT21 sensor
+static unsigned aqi, tvoc, eco2, aqi_valid;    // received from ENS160 sensor
+
+
+void task_poll_climate( void* userData )
+{
+    while (1) {
+        if (hasAHT && update_AHT(ahtT,ahtH)) {
+            // do nothing
+        }
+        if (hasBME && update_BME(bmeT,bmeH,bmeP))
+            int_refresh++;
+        if (hasENS && update_AQI(aqi_valid,aqi,tvoc,eco2))
+            aqi_refresh++;
+        vTaskDelay(INTERVAL_DISPLAY_CLIMATE);
+    }
+}
+
+
+/**
+ * @brief Initialize sensors for climate and air quality, 
+ * connect to MQTT where we publish and receive weather and climate data,
+ * and create task to poll sensors
+ * 
+ * @return true 
+ * @return false 
+ */
+bool init_ClimateSensors()
+{
+    BEGIN_HEAP_TRACE();
+    if (!init_Sensors_I2C()) return false;
+    
+    hasBME = init_Sensors_BME();
+    hasAHT = init_Sensors_AHT();
+    hasENS = init_Sensors_ENS();
+    log_i("BME:%s  AHT:%s  ENS:%s", 
+        hasBME ? GREEN_OK : RED_ERROR, 
+        hasAHT ? GREEN_OK : RED_ERROR,
+        hasENS ? GREEN_OK : RED_ERROR
+    );
+
+    if (hasBME || hasENS) 
+        xTaskCreate(task_poll_climate, "poll_climate", 4000, NULL, 5, NULL); 
+
+    END_HEAP_TRACE();
+    return hasBME || hasENS;
+}
+
+
+/**
+ * @brief Publish climate data from BME280 sensor to MQTT
+ * 
+ */
+static void publish_bme()
+{
+    char msg[10];
+
+    sprintf(msg,"%.1f",bmeT);
+    ohMqttClient.publish("temperature",msg);
+    sprintf(msg,"%.0f",bmeH);
+    ohMqttClient.publish("humidity",msg);
+    if (bmeP > 0.0) {
+        sprintf(msg,"%.0f",bmeP);
+        ohMqttClient.publish("pressure",msg);
+    }
+}
+
+
+/**
+ * @brief Publish air quality data from ENS160 sensor to MQTT
+ * 
+ */
+static void publish_aqi()
+{
+    char msg[10];
+
+    sprintf(msg,"%d",aqi);
+    ohMqttClient.publish("aqi",msg);
+    sprintf(msg,"%d",tvoc);
+    ohMqttClient.publish("tvoc",msg);
+    sprintf(msg,"%d",eco2);
+    ohMqttClient.publish("co2",msg);
+}
+
+
+#endif // HAS_SENSORS
+
+
+void loop_ClimateSensors()
+{
+    if (ext_refresh) {
+        ext_refresh = 0;
+        log_i("weather: " ANSI_BOLD "%.1f" ANSI_RESET " °C"
+            "  " ANSI_BOLD "%.0f" ANSI_RESET " %%rH"
+            "  " ANSI_BOLD "%.0f" ANSI_RESET" hPa",
+            owmT,owmH,owmP
+        );
+#if HAS_DISPLAY
+        display_update_climate( true,owmT,owmH,hasENS ? 0.0 : owmP);
+#endif
+    }
+
+#if HAS_SENSORS
+    if (int_refresh) {
+        int_refresh = 0;
+        log_i( "BME: "
+            ANSI_BOLD "%.1f" ANSI_RESET "°C  "
+            ANSI_BOLD "%.0f" ANSI_RESET " %%rH  "
+            ANSI_BOLD "%.0f" ANSI_RESET " hPa  ",
+            bmeT, bmeH, bmeP
+        );
+#if HAS_DISPLAY
+        display_update_climate( false,bmeT,bmeH,hasENS ? 0.0 : bmeP);
+#endif  // HAS_DISPLAY
+        EVERY(INTERVAL_PUBLISH_BME)
+            publish_bme();
+        END_EVERY
+    }
+
+    if (aqi_refresh) {
+        aqi_refresh = 0;
+        log_i(
+            "ENS:  val:%d"
+            "  AQI:" ANSI_BOLD "%u" ANSI_RESET
+            "  TVOC:" ANSI_BOLD "%u" ANSI_RESET
+            "  eCO2:" ANSI_BOLD "%u" ANSI_RESET, 
+            aqi_valid, aqi, tvoc, eco2 
+        );
+#if HAS_DISPLAY
+        display_update_aqi( aqi, tvoc, eco2 );
+#endif // HAS_DISPLAY
+        EVERY(INTERVAL_PUBLISH_ENS)
+            publish_aqi();
+        END_EVERY
+    }
+#endif // HAS_SENSORS
+}
+
+
+/**
+ * @brief Callback when subscribed to weather-related MQTT topic
+ * 
+ * @param subtopic 
+ * @param msg 
+ * @param length 
+ * @param total_length 
+ */
+void onReceiveWeather( const char *subtopic, const char *msg, size_t length, size_t total_length )
+{
+    if (!strcmp("temperature",subtopic)) {
+        owmT = atof(msg);
+    } else if (!strcmp("humidity",subtopic)) {
+        owmH = atof(msg);
+    } else if (!strcmp("pressure",subtopic)) {
+        owmP = atof(msg);
+    } else if (!strcmp("time",subtopic)) {
+        syslog_i("received weather update");
+        ext_refresh++;
+    } else {
+        log_e(RED_ERROR "unknown subtopic: '%s'",subtopic);
+    }
+}
+
+
+bool initClimateMQTT()
+{
+    ohMqttClient.on(MQTT_SUB_WEATHER,onReceiveWeather);
+    return true;
+}
+
+
+#pragma endregion
+//==============================================================================
+#pragma region RGB LED stuff (optional)
+#if HAS_RGB_LED
+
+void show_state_on_LED( state_t state )
 {
     switch (state) {
         case stIdle:        // Blue breathe
@@ -873,8 +1074,8 @@ void update_LED_mode( state_t state )
             rgbLED.set_color(255,0,0);
             rgbLED.set_mode(StatusLED::MODE_BLINK);
             break;
-        case stOTA:             // Green blink
-            rgbLED.set_color(0,255,0);
+        case stOTA:             // Purple blink
+            rgbLED.set_color(255,0,255);
             rgbLED.set_mode(StatusLED::MODE_BLINK);
             break;
         default: 
@@ -906,10 +1107,6 @@ void led_task( void* userData )
 }
 
 
-/**
- * @brief Initialize RGB LED subsystem
- * 
- */
 void init_LED()
 {
     led_hello();
@@ -918,7 +1115,7 @@ void init_LED()
 
 #else
 
-void update_LED_mode( state_t state ) {}
+void show_state_on_LED( state_t state ) {}
 void init_LED() {}
 
 #endif // HAS_RGB_LED
@@ -933,56 +1130,20 @@ void setState( state_t new_state )
     if ((new_state != old_state) && (new_state != stIdle))
         t_statechanged = millis();
     state = old_state = new_state;
-    update_LED_mode(state);
+
+    show_state_on_display(state);
+    show_state_on_LED(state);
 }
 
 
 /**
- * @brief Update LED color and pattern as needed, call this from loop()
+ * @brief Update state logic
  * 
  */
 void loopState()
 {
     if (((unsigned)(millis() - t_statechanged) > 3000) && (state >= stCommandOk))
         setState(stIdle);
-}
-
-
-/**
- * @brief Start recording voice samples, so we can later play them back 
- * or upload to a server
- * 
- */
-void start_recording()
-{
-    voice.ptr = voice.buf;
-    voice_samples = 0;
-    isRecording = true;
-    t_recording_start = millis();
-    log_i("Start recording");
-    
-}
-
-
-void stop_recording()
-{
-    if (!isRecording) return;
-    voice_samples = voice.ptr - voice.buf;
-    voice.ptr = voice.buf;
-    isRecording = false;
-    hasRecord = true;
-    log_i("Stop recording after %u ms, received %u samples", 
-        millis()-t_recording_start,
-        (unsigned)voice_samples
-    );
-}
-
-
-void start_playback()
-{
-    log_i("Start playback, %u samples %s", 
-        unsigned(voice_samples), calc_min_max(voice.buf, voice_samples));
-    start_playing( voice.buf, voice.buf + voice_samples, SAMPLE_RATE );
 }
 
 
@@ -1038,7 +1199,6 @@ bool copy_buf_to_voice( rx_raw_t* data, size_t nbytes )
 
     while (nsamples--) {
         y = rx_to_16(data[0]);
-        //y <<= 3;   // amplify 18dB
         *voice.ptr++ = y;
         data += RX_NCHANNELS;
         if (voice.ptr==voice.end) {
@@ -1050,15 +1210,6 @@ bool copy_buf_to_voice( rx_raw_t* data, size_t nbytes )
 }
 
 
-/**
- * @brief Upload a recorded voice command to an FTP server, in WAV format
- * 
- * @param namebase  URL of WAV filename, date and time will be appended
- * @param data      the voice samples (always mono)
- * @param nsamples  number of voice samples
- * @return true     upload successful
- * @return false    problem with upload
- */
 bool saveWave( const char* namebase, const int16_t* data, size_t nsamples )
 {
 #ifdef FTP_SERVER
@@ -1068,9 +1219,8 @@ bool saveWave( const char* namebase, const int16_t* data, size_t nsamples )
     strftime(s_now, sizeof s_now, "%Y%m%dT%H%M%SZ", tmnow);
     char filename[100];
     snprintf(filename,sizeof filename,"%s_%s.WAV",namebase,s_now);
-    log_i("write wave to '" ANSI_BLUE "%s" ANSI_RESET "' (%u samples)",
-        filename, nsamples);
-    log_i("%s", calc_min_max( data, nsamples ));    
+    log_i("write wave to '" ANSI_BLUE "%s" ANSI_RESET "' (%u samples) %s",
+        filename, nsamples, calc_min_max( data, nsamples ));
     return uploadWave( 
         FTP_SERVER, FTP_USER, FTP_PASS,
         filename, 
@@ -1083,9 +1233,51 @@ bool saveWave( const char* namebase, const int16_t* data, size_t nsamples )
 }
 
 
+/**
+ * @brief Start recording mic signal into `voice` buffer,
+ * for later upload or playback
+ */
+void start_recording()
+{
+    voice.ptr = voice.buf;
+    voice_samples = 0;
+    isRecording = true;
+    t_recording_start = millis();
+    log_i("Start recording");    
+}
+
+
+/**
+ * @brief End recording mic signal into `voice` buffer
+ */
+void stop_recording()
+{
+    if (!isRecording) return;
+    voice_samples = voice.ptr - voice.buf;
+    voice.ptr = voice.buf;
+    isRecording = false;
+    hasRecord = true;
+    log_i("Stop recording after %u ms, received %u samples", 
+        millis()-t_recording_start,
+        (unsigned)voice_samples
+    );
+}
+
+
+/**
+ * @brief Start playing back via speaker a previously recorded microphone signal
+ */
+void start_playback()
+{
+    log_i("Start playback, %u samples %s", 
+        unsigned(voice_samples), calc_min_max(voice.buf, voice_samples));
+    start_playing( voice.buf, voice.buf + voice_samples );
+}
+
+
 #pragma endregion
 //==============================================================================
-#pragma region I2S receive (using Arduino library)
+#pragma region I2S receive 
 
 
 /**
@@ -1096,9 +1288,8 @@ bool saveWave( const char* namebase, const int16_t* data, size_t nsamples )
  */
 static void _sr_rx_process( char* out, size_t nbytes )
 {
-    size_t nsamples = nbytes / (sizeof(int16_t) * RX_NCHANNELS);
     int ampshift = isPlaying ? config.gain_mic_play : config.gain_mic;   // amplify mic unless beep is playing
-    nsamples = nbytes / sizeof(int16_t);
+    size_t nsamples = nbytes / sizeof(int16_t);
     amplify( (int16_t*)out, nsamples, ampshift );
 }
 
@@ -1113,12 +1304,20 @@ static void _sr_rx_process( char* out, size_t nbytes )
  */
 size_t MyRxI2SClass::readBytes(char *buffer, size_t size)
 {
-    size_t bytes_read = I2SClass::readBytes(buffer,size);
+    static const int bytes_per_sample = (sizeof(int16_t) * RX_NCHANNELS);
+    int samples_required = size / bytes_per_sample;
+    int samples_read = codec.audio_read( (rx_raw_t*)buffer, samples_required );    
+    rx_raw_t* rxb = (rx_raw_t*)buffer;
+    strncpy( frame_range_0, calc_min_max( rxb+0, samples_read, 2 ), sizeof(frame_range_0));
+    strncpy( frame_range_1, calc_min_max( rxb+1, samples_read, 2 ), sizeof(frame_range_1));
+    nFrames++;
+    size_t bytes_read = samples_read * bytes_per_sample;
     _sr_rx_process( buffer, size );
     if (isRecording) {
         bool ok = copy_buf_to_voice( (rx_raw_t*)buffer, size);
         if (!ok) stop_recording();
     }
+    //log_i("r %u bytes",bytes_read);
     return bytes_read;
 }
 
@@ -1147,11 +1346,6 @@ static const char* mnname =
 #endif
 
 
-/**
- * @brief Add info about speech recognition configuration to a JSON struct
- * 
- * @param doc   JSON struct that info will be added to
- */
 void reportSRinfoJSON( JsonDocument& doc )
 {
     doc["wake"] = wwname;
@@ -1164,11 +1358,6 @@ void reportSRinfoJSON( JsonDocument& doc )
 }
 
 
-/**
- * @brief Return info about speech recognition configuration as a JSON string
- * 
- * @return const char*  the JSON-formatted string
- */
 const char* reportSRinfoString()
 {
     JsonDocument doc;
@@ -1178,11 +1367,6 @@ const char* reportSRinfoString()
 }
 
 
-/**
- * @brief Print info about speech recognition configuration to <serial>
- * 
- * @param serial    the UART to print to
- */
 void printSRinfo( Print& serial )
 {
     serial.printf(" I2S Audio: %d Hz, TX %d bits %s, RX %d/%d bits %s", 
@@ -1203,16 +1387,33 @@ void printSRinfo( Print& serial )
 
 void print_all_Environment( Print& serial )
 {
+#ifdef LVGL_VERSION_MAJOR
+    serial.printf(" LVGL " ANSI_BOLD "%d.%d.%d" ANSI_RESET " ",
+        LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH );
+#endif    
     printEnvironment(serial);
 	printSRinfo(serial);
 }
 
 
-/**
- * @brief Return info about usage statistsics as a JSON string
- * 
- * @return const char* 
- */
+const char* myEnvironmentReport()
+{
+    JsonDocument doc;
+
+    reportEnvironmentJSON(doc);
+#ifdef LVGL_VERSION_MAJOR
+    char lvgl_version[10];
+    snprintf(lvgl_version,sizeof(lvgl_version),"%d.%d.%d",
+        LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH );
+    doc["LVGL"] = lvgl_version;
+#endif    
+    reportSRinfoJSON(doc);
+    serializeJson(doc,msgbuf,sizeof(msgbuf));
+    log_i("report: \n%s",msgbuf);
+    return msgbuf;
+}
+
+
 const char* myDebugReport()
 {
     JsonDocument doc;
@@ -1243,10 +1444,9 @@ const char* myDebugReport()
 
 static void print_NTP_servers(void)
 {
-    const char* ntp_servername;
     for (uint8_t i = 0; i < SNTP_MAX_SERVERS; ++i){
-        if ((ntp_servername=esp_sntp_getservername(i))){
-            log_i(IF_NAME "NTP server %d: %s", i, ntp_servername);
+        if (esp_sntp_getservername(i)){
+            log_i(IF_NAME "NTP server %d: %s", i, esp_sntp_getservername(i));
         } else {
             // we have either IPv4 or IPv6 address, let's print it
             char buff[IP4ADDR_STRLEN_MAX];
@@ -1278,8 +1478,6 @@ static bool start_NTP()
 }
 
 
-unsigned nWifiConnect = 0;
-
 void onWiFiEvent(WiFiEvent_t event) 
 {
 	switch (event) {
@@ -1291,7 +1489,6 @@ void onWiFiEvent(WiFiEvent_t event)
 		
     case ARDUINO_EVENT_WIFI_STA_CONNECTED:
 		log_i( IF_NAME ANSI_BRIGHT_GREEN "connected" ANSI_RESET );
-        nWifiConnect++;
 		break;
 		
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
@@ -1367,36 +1564,6 @@ bool loopWifi()
 }
 
 
-/**
- * @brief Add Wifi performance parameters to JSON report
- * 
- * @param doc  reference to JSON object to add to
- */
-void reportWifi( JsonDocument& doc )
-{
-    int dBm = WiFi.RSSI();        // in dBm
-    int quality;
-    if (dBm <= -100) {
-        quality = 0;
-    } else if (dBm >= -50) {
-        quality = 100;
-    } else {
-        quality = 2 * (dBm + 100);    
-    }
-
-    doc["RSSI"] = quality;
-    doc["nConnect"] = nWifiConnect;
-}
-
-
-const char* reportWifiString()
-{
-    JsonDocument doc;
-    reportWifi(doc);
-    serializeJson(doc,msgbuf,sizeof(msgbuf));
-    return msgbuf;
-}
-
 #pragma endregion
 //==============================================================================
 #pragma region Receive WAV file via MQTT and play
@@ -1410,7 +1577,7 @@ const char* reportWifiString()
  */
 void start_collecting( unsigned nbytes, unsigned sample_rate )
 {
-    log_i("Start collecting WAV file, %u bytes at %d Hz", nbytes, sample_rate );
+    syslog_i("Start collecting WAV file, %u bytes at %d Hz", nbytes, sample_rate );
     if (!wav.alloc(nbytes/sizeof(int16_t))) {
         log_e(RED_ERROR "Failed to allocate %u bytes for WAV buffer", 
             nbytes );
@@ -1433,9 +1600,8 @@ void stop_collecting()
     isCollecting = false;
     wav.end = (int16_t*) wav_byte_ptr;
     unsigned nsamples = (unsigned)(wav.end - wav.buf);
-    const char* minmax = calc_min_max( wav.buf, nsamples );
-    log_i("WAV file complete, %u samples, %s", nsamples, minmax );
-    syslog_i("WAV file complete, %u samples, %s", nsamples, minmax );
+    log_i("WAV file complete, %u samples, %s",
+        nsamples, calc_min_max( wav.buf, nsamples ));
     if (config.gain_mqtt)
         amplify( wav.buf, nsamples, config.gain_mqtt );
     start_playing( wav );
@@ -1463,15 +1629,6 @@ void collect_wav_bytes( const char* message, size_t length )
 void updateCommands();
 
 
-/**
- * @brief Handle incoming MQTT messages from OpenHAB broker. 
- * Note: this does not support multi-part messages
- * 
- * @param topic         subtopic of the message, beyond the base we subscribed to
- * @param message       MQTT message, converted to a 0-terminated string if not multi-part
- * @param length        length of this mesage chunk (for long multi-part messages)
- * @param total_length  length of complete message (may be > length for mult-part messages)
- */
 void onReceiveOh( 
     const char* topic, 
     const char* message, 
@@ -1492,11 +1649,6 @@ void onReceiveOh(
 }
 
 
-/**
- * @brief Publish collection of info re software version, hardware and configuration,
- * as several JSON-formatted strings
- * 
- */
 void publishDebugInfo()
 {
     ohMqttClient.publish("version",VERSION,true);
@@ -1504,16 +1656,9 @@ void publishDebugInfo()
     ohMqttClient.publish("sr",reportSRinfoString(),true);
     ohMqttClient.publish("config",config_to_json(),true);
     ohMqttClient.publish("debug",reportMemoryInfoString(),true);
-    ohMqttClient.publish("wifi",reportWifiString(),true);
 }
 
 
-/**
- * @brief Connect to OpenHAB MQTT broker and subscribe to topics
- * 
- * @return true     Connection successful
- * @return false    Some problem
- */
 bool initInfoMqtt()
 {
     BEGIN_HEAP_TRACE();
@@ -1556,10 +1701,6 @@ const char hermes_playFinished[] = R"rawliteral({"id": "%s", "sessionId": "%s"})
 #define TOPIC_PLAYFINISHED "hermes/audioServer/${HOSTNAME}/playFinished"
 
 
-/**
- * @brief Publish Rhasspy-style MQTT message to indicate  
- * that playback of received WAV file is complete.
- */
 void publishFinished()
 {
     if (sessionId.length() > 0) {
@@ -1571,21 +1712,12 @@ void publishFinished()
 }
 
 
-/**
- * @brief Publish Rhasspy-style MQTT message to indicate  
- * that wakeword has been detected
- */
 void publishWakeword()
 {
     snprintf(msgbuf,sizeof(msgbuf),hermes_wakeword,WiFi.getHostname());
     rhMqttClient.publish(TOPIC_WAKEWORD_DETECTED,NULL,msgbuf);
 }
 
-
-/**
- * @brief Publish Rhasspy-style MQTT message to indicate  
- * that timeout has occured, and no voice command detected
- */
 
 void publishTimeout()
 {
@@ -1595,8 +1727,7 @@ void publishTimeout()
 
 
 /**
- * @brief Publish Rhasspy-style MQTT message 
- * with JSON string with info about voice command that has been detected
+ * @brief Publish a Rhasspy-esque JSON string with info about command `id`
  * 
  * @param id   command id, starts with 1
  */
@@ -1610,12 +1741,12 @@ void publish_command( int id )
         char* msg = (char*) malloc(MSG_BUFLEN);
         snprintf( msg, MSG_BUFLEN, hermes_intent,
             WiFi.getHostname(), 
-            (pinfo->value && pinfo->value[0]) ? pinfo->value : "nil" ,
+            pinfo->value ? pinfo->value : "",
             pinfo->itemname,
             pinfo->label,
             pinfo->grapheme
         );
-        log_i("publish id %d to '%s':\n" ANSI_BLUE "%s" ANSI_RESET, 
+        log_d("publish id %d to '%s':\n" ANSI_BLUE "%s" ANSI_RESET, 
             id, pinfo->action, msg);
         rhMqttClient.publish( pinfo->action, msg );
         free(msg);
@@ -1623,8 +1754,30 @@ void publish_command( int id )
 }
 
 
+void publish_command_with_value( int id, const char* value )
+{
+    const command_info_t* pinfo = srCommands[id];
+    if (pinfo==NULL) {
+        log_e(RED_ERROR "unknown command %d",id);
+    } else {
+        constexpr size_t MSG_BUFLEN = 500;
+        char* msg = (char*) malloc(MSG_BUFLEN);
+        snprintf( msg, MSG_BUFLEN, hermes_intent,
+            WiFi.getHostname(), 
+            value,
+            pinfo->itemname,
+            pinfo->label,
+            pinfo->grapheme
+        );
+        log_i("publish id %d to '%s':\n" ANSI_BLUE "%s" ANSI_RESET, 
+            id, pinfo->action, msg);
+        //rhMqttClient.publish( pinfo->action, msg );
+        free(msg);
+    }
+}
+
 /**
- * @brief Handle incoming MQTT message from Rhasspy broker
+ * @brief Process message received via MQTT
  * 
  * @param topic     subtopic (0-terminated) or NULL for multi-part message
  * @param message   payload, 0-terminated unless it is part of a multi-part message
@@ -1662,23 +1815,32 @@ void onReceiveRh(
             pWAV->fmt_chunk.num_of_channels,
             ms
         );
-        if (pWAV->fmt_chunk.bits_per_sample==16 
-            && pWAV->fmt_chunk.num_of_channels==1 
-            && !isCollecting
-            && !isPlaying
-            ) {
+        if (pWAV->fmt_chunk.bits_per_sample != 16) {
+            log_w("MQTT WAV bits: expected 16, received %u",pWAV->fmt_chunk.bits_per_sample);
+            return;
+        }
+        if (pWAV->fmt_chunk.num_of_channels != 1) {
+            log_w("MQTT WAV channels: expected 1, received %u",pWAV->fmt_chunk.num_of_channels);
+            return;
+        }
+        if (pWAV->fmt_chunk.sample_rate != SAMPLE_RATE) {
+            log_w("MQTT WAV samplerate: expected %u, received %u",
+                SAMPLE_RATE,pWAV->fmt_chunk.sample_rate);
+            return;
+        }
+        if ( !isCollecting && !isPlaying ) {
             // ok, let's start collecting data, only if we are not currently playing something else
             start_collecting( pWAV->data_chunk.subchunk_size, pWAV->fmt_chunk.sample_rate );
             if (isCollecting) {
                 collect_wav_bytes( message + sizeof(pcm_wav_header_t), length-sizeof(pcm_wav_header_t) );
             }
-        }
+        } 
     }
 }
 
 
 /**
- * @brief Connect to Rhasspy MQTT broker and subscribe to topics
+ * @brief Connect to MQTT broker and subscribe to topics
  * 
  * @return true     everything ok
  * @return false    some error
@@ -1698,18 +1860,9 @@ bool initRhMQTT()
 #pragma region Download from HTTP server
 
 
-/**
- * @brief Download something (command definitions or HTML code) from an HTTP server
- * 
- * @param url       URL of file on HTTP server
- * @param content   downloaded text is returned in this String
- * @param modified  file modification date reported by HTTP server
- * 
- * @return true     = successful download;
- * @return false    = something went wrong
- */
 static bool download_from_HTTP( const String& url, String& content, String& modified)
 {
+    //String s;
     HTTPClient httpClient;
     httpClient.begin( url );
     static const char* headerNames[] = { "Last-Modified" };
@@ -1727,17 +1880,6 @@ static bool download_from_HTTP( const String& url, String& content, String& modi
 }
 
 
-/**
- * @brief Download a file from HTTP server, save it to FFS, and return content as a String
- * 
- * @param baseURL   URL of HTTP server, without the filename
- * @param filename  name of file on HTTP server and in FFS
- * @param content   downloaded text is returned in this String
- * @param modified  file modification date reported by HTTP server
- * 
- * @return true     = successful download;
- * @return false    = something went wrong
- */
 bool download_and_store( const String& baseURL, const String& filename, String& content, String& modified )
 {
     if (download_from_HTTP( baseURL+filename, content, modified)) {
@@ -1803,10 +1945,8 @@ bool load_sr_commands()
  */
 void updateCommands()
 {
-    ESP_SR.pause();
     if (load_sr_commands())
         srCommands.fill();
-    ESP_SR.resume();
 }
 
 
@@ -1826,14 +1966,12 @@ void reportCommand( int id )
             " text='" ANSI_BOLD "%s" ANSI_RESET "',"
             " action='" ANSI_BOLD "%s" ANSI_RESET "',"
             " item='" ANSI_BOLD "%s" ANSI_RESET "',"
-            " value='" ANSI_BOLD "%s" ANSI_RESET "'"
-            "\n"
-            ,
+            " value='" ANSI_BOLD "%s" ANSI_RESET "'",
             id,
             pinfo->grapheme,
             pinfo->action,
             pinfo->itemname,
-            pinfo->value ? pinfo->value : "nil"
+            pinfo->value ? pinfo->value : "(none)"
         );
     }
 }
@@ -1846,16 +1984,21 @@ void reportCommand( int id )
  * @param command_id 
  * @param phrase_id 
  */
-void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
+void onSrEvent(sr_event_t event, int command_id, int phrase_id) 
+{
+    static int last_id = -1;
+    const command_info_t *pinfo;
+
     switch (event) {
         case SR_EVENT_WAKEWORD: 
-            log_d("WakeWord detected!"); 
+            log_i("WakeWord detected!"); 
             start_recording();
             start_playing(beep_wake);
+            last_id = -1;
             break;
         case SR_EVENT_WAKEWORD_CHANNEL:
             log_i("WakeWord channel %d verified!", command_id);
-            ESP_SR.setMode(SR_MODE_COMMAND);  // Switch to Command detection
+            ESP_SRx.setMode(SR_MODE_COMMAND);  // Switch to Command detection
             setState(stDetected);
             break;
         case SR_EVENT_TIMEOUT:
@@ -1863,18 +2006,29 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
             stop_recording();
             stats.n_cmds_err++;
             start_playing(beep_error);
-            ESP_SR.setMode(SR_MODE_WAKEWORD);  // Switch back to WakeWord detection
+            ESP_SRx.setMode(SR_MODE_WAKEWORD);  // Switch back to WakeWord detection
             setState(stCommandError);
             break;
         case SR_EVENT_COMMAND:
-            log_i("Command %d detected!", command_id);
-            stop_recording();
-            stats.n_cmds_ok++;
+            //log_i("Command %d detected!", command_id);
             reportCommand(command_id);
-            publish_command(command_id);
-            //ESP_SR.setMode(SR_MODE_COMMAND);  // Allow for more commands to be given, before timeout
-            ESP_SR.setMode(SR_MODE_WAKEWORD); // Switch back to WakeWord detection
-            setState(stCommandOk);
+            pinfo = srCommands[command_id];
+            if (!strcmp(pinfo->action,"start")) {
+                // continue recording ...
+                ESP_SRx.setMode(SR_MODE_COMMAND);
+                last_id = command_id;
+            } else {
+                stop_recording();
+                stats.n_cmds_ok++;
+                if (last_id > 0) {
+                    publish_command_with_value(last_id,pinfo->value);
+                } else {
+                    publish_command(command_id);
+                }
+                //ESP_SRx.setMode(SR_MODE_COMMAND);  // Allow for more commands to be given, before timeout
+                ESP_SRx.setMode(SR_MODE_WAKEWORD); // Switch back to WakeWord detection
+                setState(stCommandOk);
+            }
             break;
         default: 
             log_w(RED_ERROR "Unknown event!");
@@ -1898,9 +2052,9 @@ void onSrEvent(sr_event_t event, int command_id, int phrase_id) {
 void init_SR()
 {
     BEGIN_HEAP_TRACE();
-    ESP_SR.onEvent(onSrEvent);
+    ESP_SRx.onEvent(onSrEvent);
     
-    bool ok = ESP_SR.begin( 
+    bool ok = ESP_SRx.begin( 
                 rx_i2s, 
                 NULL, 
                 0, 
@@ -1909,9 +2063,9 @@ void init_SR()
                 INPUT_FORMAT 
             );    
     if (ok)
-        log_i(GREEN_OK "ESP_SR.begin()");
+        log_i(GREEN_OK "ESP_SRx.begin()");
     else
-        log_e( RED_ERROR "ESP_SR.begin() failed!" );
+        log_e( RED_ERROR "ESP_SRx.begin() failed!" );
 
     if (srCommands.fill())
         log_i("Sent %u commands to ESP-SR", srCommands.count() );
@@ -2127,7 +2281,8 @@ void init_Webserver()
 
     server.on("/env",[](AsyncWebServerRequest *request) {
         log_i(HTTPD "request " ANSI_BLUE "/env" ANSI_RESET);
-        request->send(200, "application/json", reportEnvironmentString());
+        //request->send(200, "application/json", reportEnvironmentString());
+        request->send(200, "application/json", myEnvironmentReport());
     });
     server.on("/mem",[](AsyncWebServerRequest *request) {
         log_i(HTTPD "request " ANSI_BLUE "/mem" ANSI_RESET);
@@ -2182,6 +2337,8 @@ void setup()
     printResetReason(DebugSerial);
     print_all_Environment(DebugSerial);
 
+//----- use configuration from RTC RAM, if valid
+
     if (!config.is_valid()) {
         config = default_config;
         log_i("initializing config, checksum=%x",config.checksum);
@@ -2189,78 +2346,141 @@ void setup()
 
     stats.clear();
 
-    setenv("TZ","CET-1CEST,M3.5.0,M10.5.0/3",1);    // Europe/Berlin
+    setenv("TZ",MY_TIMEZONE,1);    
     tzset();
+
+//----- hardware-related stuff
+
+    board.init();
 
     init_LED();
 
-    if (!init_FS()) fail("LittleFS mount failed"); 
+    if (!init_FS()) 
+        fail("LittleFS mount failed"); 
 
-    //----- I2S ----------------------------------------------------------------
-    if (!initVoiceRecorder()) fail("can't init voice recorder");
-    if (!i2s_rx_tx_initialize()) fail("can't initialize I2S RX/TX");
-    xTaskCreate(i2s_tx_task, "i2s_tx_task", 4000, NULL, 5, NULL); 
+//----- load WAV jingles from SPIFFS -------------------------------------------
 
-    //----- WAV jingles from SPIFFS --------------------------------------------
     bool ok = true;
     ok = ok && loadWAV("/beep_hello.wav",beep_hello);
     ok = ok && loadWAV("/beep_wake.wav", beep_wake);
     ok = ok && loadWAV("/beep_error.wav", beep_error);
     if (!ok) fail("can't load WAV files");
 
-    //----- WiFi ---------------------------------------------------------------
-    if (!setupWifi()) fail("Can't connect to WiFi");
+    if (!initVoiceRecorder()) 
+        fail("can't init voice recorder");
 
-    //----- Syslog -------------------------------------------------------------
-#ifdef LOG_SERVER
-    init_syslog(LOG_SERVER);
-#endif
-    syslog_i("---------- Starting SYSLOG");
+//----- WiFi and connectivity stuff---------------------------------------------
 
-    //----- MQTT ---------------------------------------------------------------
-    if (!initRhMQTT()) fail("can't connect to Rhasspy MQTT broker");
-    if (!initInfoMqtt()) fail("can't connect to OpenHAB MQTT broker");
+    if (!setupWifi()) 
+        fail("Can't connect to WiFi");
 
     // now that the boring bootloader and WiFi messages are over, let's have more info
     esp_log_level_set("*", ESP_LOG_INFO);
 
-    start_playing( beep_hello );
+#ifdef LOG_SERVER
+    init_syslog(LOG_SERVER);
+    syslog_i("--------- Starting SYSLOG");
+#endif
+
+    if (!initClimateMQTT()) 
+        fail("can't connect to OpenHAB MQTT broker (climate)");
+    if (!initRhMQTT()) 
+        fail("can't connect to Rhasspy MQTT broker");
+    if (!initInfoMqtt()) 
+        fail("can't connect to OpenHAB MQTT broker");
 
 #if USE_WEBSERVER
     init_Webserver();
 #endif 
 
-    //----- speech recognition -------------------------------------------------
-    if (!load_sr_commands()) fail("Can't load SR commands file");
-    init_SR();
-
     setupOTA(DebugSerial); 
 	ArduinoOTA.onStart([]() {
-        ESP_SR.end();
+        ESP_SRx.end();
         setState(stOTA);
 	});
+
+//----- display and sensors ------------------------------------------------
+
+#if HAS_DISPLAY
+    lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+    if (ESP_OK != lvgl_port_init(&lvgl_cfg)) {
+        fail("lvgl_port_init() failed");
+    }
+
+    lv_disp_t* disp_handle = board.get_disp_handle();
+    if (NULL==disp_handle) 
+        fail("init LCD");
+    log_i(GREEN_OK "init LCD");
+
+    //----- add content to LVGL screen
+    if (!init_LVGL(disp_handle)) 
+        fail("init_LVGL");
+    log_i(GREEN_OK "init_LVGL()");
+
+    //----- init backlight
+    board.set_brightness(90);
+
+    show_state_on_display(state);
+#endif 
+
+#if HAS_SENSORS
+    if (!init_ClimateSensors()) {
+        log_e(RED_ERROR "failed to init sensors");
+    }
+#endif 
+
+//----- audio ------------------------------------------------------------------
+
+    //esp_log_level_set("*", ESP_LOG_DEBUG);
+    if (!codec.init( SAMPLE_RATE, SAMPLE_RATE )) 
+        fail("codec.init()");
+
+    void* codec_i2c = codec.get_i2c_handle();
+    if (codec_i2c) probe_i2c(codec_i2c);
+
+    codec.start();        
+    esp_log_level_set("*", ESP_LOG_INFO);
+    log_i(GREEN_OK "codec started");
+    xTaskCreate(i2s_tx_task, "i2s_tx_task", 4000, NULL, 5, NULL); 
+
+//----- speech recognition -----------------------------------------------------
+
+    if (!load_sr_commands()) 
+        fail("Can't load SR commands file");
+    init_SR();
+
+//----- wrap it up -------------------------------------------------------------
+
+    start_playing( beep_hello );
+    config.gain_mic_play = 0;
+    start_recording();
 
     publishDebugInfo();
     printMemoryInfo(DebugSerial);
 
     bootTime = time(NULL);    
-    log_i("-------------------------%s---------------------",timeNow().c_str());
+    DebugSerial.printf("-------------------------%s---------------------\n",timeNow().c_str());
 }
 
 
 void loop() 
 {
     loopState();
+
     if (loopWifi()) {
         ArduinoOTA.handle();
     }
 
+    loop_ClimateSensors();
+
     if (hasRecord) {
         hasRecord = false;
-        if (config.opt_playback)
+        if (config.opt_playback || isFirstRecord)
             start_playback();
-        if (config.opt_savewave)
+        if (config.opt_savewave || isFirstRecord)
             saveWave(WiFi.getHostname()+8, voice.buf, voice_samples);
+        isFirstRecord = false;
+        config.gain_mic_play = -3;
     }
 
     // once per day or so, report memory status
@@ -2276,7 +2496,12 @@ void loop()
         END_EVERY
 	}
 
-    delay(100); 
+    delay(1000); 
+    /*
+    // report L/R mic levels. These are "true" mic levels received from codec, before amplify()
+    if (DebugSerial)
+        DebugSerial.printf("\r%0u 0:%s 1:%s   \r", nFrames, frame_range_0, frame_range_1 );
+    */
 }
 
 #pragma endregion

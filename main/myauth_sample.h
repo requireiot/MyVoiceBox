@@ -6,6 +6,8 @@
 #define WIFI_SSID       "my-wifi-ssid"
 #define WIFI_PASSWORD   "my-secret-wifi-password"
 
+#define MY_TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
+
 // where to upload recorded WAV files -- if not defined, WAV files are not saved
 #define FTP_SERVER  "my-ftp-server.home"
 #define FTP_USER    "my-ftp-username"
@@ -22,8 +24,5 @@
 
 // local NTP server, so this gadget does not need internet access
 #define NTP_SERVER "fritz.box"
-
-// remote syslog server, if available
-//#define LOG_SERVER "my-log-server.home"
 
 #endif // __MYAUTH_H

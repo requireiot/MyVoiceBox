@@ -5,7 +5,7 @@
  * @date        2025-10-06
  * tabsize  4
  * 
- * This Revision: $Id: uploadWAV.cpp 1958 2026-02-21 10:35:40Z  $
+ * This Revision: $Id: uploadWAV.cpp 2015 2026-08-16 18:04:56Z  $
  */
 
 /*
@@ -25,7 +25,7 @@
 #include <WiFi.h>
 #include <SPIFFS.h>
 #include <FTPClient.h>      // MIT license, https://github.com/exocet22/TinyFTPClient
-#include "wav_header.h"
+#include "wav_header.h"     // part of Arduino ESP_I2S library
 #include "uploadWAV.h"
 
 
@@ -94,7 +94,7 @@ bool uploadWave(
     ftpClient.write_file( filename, (uint8_t*)&wavHdr, sizeof wavHdr);
     ftpClient.append_file( filename, (uint8_t*)data, nbytes );
     ftpClient.close();
-    log_i("WAV file written, %u ms", millis()-t_wav_start);
+    log_i("WAV file written in %u ms", millis()-t_wav_start);
 
     return true;
 }

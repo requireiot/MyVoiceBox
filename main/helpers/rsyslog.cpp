@@ -5,7 +5,7 @@
  * Created		: 29-Mar-2026
  * Tabsize		: 4
  * 
- * This Revision: $Id: $
+ * This Revision: $Id: rsyslog.cpp 2013 2026-08-16 12:18:31Z  $
  */
 
 /*

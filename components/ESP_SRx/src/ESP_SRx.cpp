@@ -67,7 +67,8 @@ esp_err_t ESP_SRx_Class::_fill(void *out, size_t len, size_t *bytes_read, uint32
   }
   i2s->setTimeout(timeout_ms);
   *bytes_read = i2s->readBytes((char *)out, len);
-  return (esp_err_t)i2s->lastError();
+  //return (esp_err_t)i2s->lastError();
+  return ESP_OK;
 }
 
 ESP_SRx_Class ESP_SRx;

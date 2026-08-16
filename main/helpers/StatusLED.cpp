@@ -5,7 +5,7 @@
  * @date        2025-10-28
  * tabsize  4
  * 
- * This Revision: $Id: $
+ * This Revision: $Id: StatusLED.cpp 2013 2026-08-16 12:18:31Z  $
  */
 
 /*
@@ -63,7 +63,7 @@ void StatusLED::init()
     digitalWrite(_pinR,HIGH);
     digitalWrite(_pinG,HIGH);
     digitalWrite(_pinB,HIGH);
-    //ledcSetClockSource(LEDC_AUTO_CLK);
+    ledcSetClockSource(LEDC_AUTO_CLK);
     ledcAttach(_pinA,400,12);
 }
 

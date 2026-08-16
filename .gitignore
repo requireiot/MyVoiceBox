@@ -6,9 +6,7 @@ sdkconfig.old
 datasheets/
 test/
 wav/
+fonts/
 hardware/MyVoiceBox-backups/
 managed_components/
 main/myauth.h 
-partitions.xlsx
-*.bak 
-dependencies.lock

@@ -5,7 +5,7 @@
  * Created		: 23-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: mqttClient.cpp 1940 2025-12-03 23:14:38Z  $
+ * This Revision: $Id: SimpleMqttClientESP.cpp 2013 2026-08-16 12:18:31Z  $
  */
 
 /*
@@ -28,7 +28,7 @@
 #include "mqtt_client.h"    // Apache license 2.0, part of ESP-IDF
 #include "esp_event.h"
 
-#include "mqttClient.h"
+#include "SimpleMqttClientESP.h"
 #include "ansi.h"
 #include "rsyslog.h"
 
@@ -226,7 +226,15 @@ void SimpleMqttClientESP::on( const char* subscribeTopic, receive_cb_t cb )
 
     subscription_t sub = { .prefix=prefix, .topic=topic, .callback=cb };
     _subscriptions.push_back(sub);
-
+/*
+    if (isConnected()) {
+        esp_mqtt_client_subscribe_single(_client, topic.c_str(), 0);
+        log_i(TAG "subscribe %d at '%s' to\n '" ANSI_BLUE "%s" ANSI_RESET "'",
+            _subscriptions.size(),
+            _broker,
+            topic.c_str());
+    }
+*/
 }
 
 

@@ -5,7 +5,7 @@
  * Created		: 21-Sep-2025
  * Tabsize		: 4
  * 
- * This Revision: $Id: SimpleReports.cpp 1936 2025-11-29 20:52:45Z  $
+ * This Revision: $Id: SimpleReports.cpp 2013 2026-08-16 12:18:31Z  $
  */
 
 /*
@@ -161,16 +161,16 @@ void printMemoryInfo( Print& serial, const char* description )
         old_heap = new_heap;
     }
     serial.printf(
-        " Heap: " ANSI_BOLD "%" PRIi32 ANSI_RESET "/%" PRIu32,
+        " Heap: free " ANSI_BOLD "%" PRIi32 ANSI_RESET " / total %" PRIu32,
         new_heap, ESP.getHeapSize() );
     serial.printf( 
-        "  min:" ANSI_BOLD "%" PRIu32 ANSI_RESET 
-        "  alloc:" ANSI_BOLD "%" PRIu32 ANSI_RESET,
+        "  min free:" ANSI_BOLD "%" PRIu32 ANSI_RESET 
+        "  max alloc:" ANSI_BOLD "%" PRIu32 ANSI_RESET,
         ESP.getMinFreeHeap(), ESP.getMaxAllocHeap() );
     serial.printf( 
-        "  PSRAM: " ANSI_BOLD "%" PRIu32 ANSI_RESET "K/%" PRIu32 "K",
+        "\n  PSRAM: free " ANSI_BOLD "%" PRIu32 ANSI_RESET "K / total %" PRIu32 "K",
         toKB(ESP.getFreePsram()), toKB(ESP.getPsramSize()) );
-    serial.printf("  Stack watermark:" ANSI_BOLD "%u" ANSI_RESET, 
+    serial.printf("\n  Stack watermark:" ANSI_BOLD "%u" ANSI_RESET, 
         (unsigned)uxTaskGetStackHighWaterMark(NULL) );
     serial.println();
 }

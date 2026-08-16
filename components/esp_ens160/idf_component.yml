@@ -1,0 +1,26 @@
+version: "1.2.8"
+description: "ESP32 espressif IoT development framework (esp-idf) compatible component
+  for ScioSense ENS160 digital metal-oxide multi-gas I2C sensor."
+license: "MIT"
+url: "https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS/tree/main/components/peripherals/i2c/esp_ens160"
+repository: "https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS.git"
+registry_url: "https://components.espressif.com"
+tags:
+- esp32
+- espressif
+- espidf
+- sciosense
+- ens160
+- volatile
+- organic
+- compounds
+- voc
+- carbon
+- dioxide
+- air
+- quality
+dependencies:
+  idf:
+    version: ">5.3.0"
+maintainers:
+- Eric Gionet <gionet.c.eric@gmail.com>

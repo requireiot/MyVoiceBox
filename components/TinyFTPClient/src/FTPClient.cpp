@@ -530,7 +530,7 @@
     size_t bytes_written=0;
     while (buffer_size) {
       bytes_written = m_passive_client.write(buffer,buffer_size);
-      log_i("wrote %u bytes",(unsigned)bytes_written);
+      log_d("wrote %u bytes",(unsigned)bytes_written);
       buffer += bytes_written;
       buffer_size -= bytes_written;
     }
