@@ -25,22 +25,22 @@
 - [x] `R204` The wakeword can be selected at build time, from the words offered by the ESP-SR component, such as "Alexa" or "HI,ESP"
 - [x] `R205` When the wakeword is detected, the device indicates that to the user
   - [x] `R205.1` The indication is made as an audible signal (beep)
-  - [x] `R205.2` The indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Blinking yellow light
+  - [x] `R205.2` When an LED or display is available, the indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Blinking yellow light
 - [x] `R206` When a voice command is recognized, the device indicates that to the user
-  - [x] `R206.1` The indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Steady green light
+  - [x] `R206.1` When an LED or display is available, the indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Steady green light
 - [x] `R207` when no voice is detected within a set time period after detecting the wakeword (timeout), then the device indicates this error condition to the user
   - [x] `R207.1` The indication is made as an audible signal (beep)
-  - [x] `R207.2` The indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Steady red light
+  - [x] `R207.2` When an LED or display is available, the indication is made as a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Steady red light
   - [x] `R207.3` The timeout period is configurable in source code
 - [x] `R208` when the device is idle, i.e. is waiting for the wakeword, it indicates that to the user
-  - [x] `R208.1` The indication is in the form of a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Breathing blue light
+  - [x] `R208.1` When an LED or display is available, the indication is in the form of a visual signal, i.e. a change in color or blink pattern of the LED. *Implementation*: Breathing blue light
 
 ## Audio output
 
 - [x] `R300` The device can receive audio files over the network, and play those on its speaker
   - [x] `R300.1` The audio files are in the format of a WAV file
   - [x] `R300.2` *Constraint*: The audio files must be mono, 16-bit
-  - [x] `R300.3` The audio files can specify a sample rate, up to 44100 S/s. *Information*: Rhasspy TTS produces files at 22050 S/s.
+  - [x] `R300.3` *Constraint*: The audio files must be at a sample rate 0f 16000 S/s. *Rationale*: the ESP-SR library expects this samplerate for microphone input, and some hardware variants don't support independent input and output samplerates.
 - [x] `R301` The device receives audio files via MQTT
   - [x] `R301.1` The device expects MQTT topics in the format that Rhasspy would send to an audio output satellite
   - [x] `R301.2` The device responds to a Rhasspy "site ID" that is its own automatically generated WiFi hostname, such as "esp32s3-ABCDEF"
@@ -51,10 +51,10 @@
   - [x] `R400.1` the gain can be specified in steps of 6 dB, i.e. one bit shift left or right
 - [x] `R401` the microphone signal is attenuated while a beep is played, to reduce the loudness and hopefully reduce interference with the speech recognition process
   - [x] `R401.1` the attenuation gain is specified in source code
-  - [x] `R401.2` the attenuation gain is specified via the Web frontend
+  - [x] `R401.2` the attenuation gain can be changed via the Web frontend
 - [x] `R402`the microphone signal is amplified when no beep is being played, to increase the loudness of the speech signal presented to the speech recognition engine
   - [x] `R402.1` the amplification gain is specified in source code
-  - [x] `R402.2` the amplification gain is specified via the Web frontend
+  - [x] `R402.2` the amplification gain can be specified via the Web frontend
 
 ## Connectivity
 
@@ -62,7 +62,7 @@
   - [x] `R500.1` the WiFi SSID and password are specified in source code
 - [x] `R501` the device communicates with the MQTT broker used by Rhasspy
   - [x] `R501.1` the MQTT broker URL is specified in source code, i.e. no need for configuration at runtime
-- [x] `R502` the device firmware can updated over-the-air (OTA)
+- [x] `R502` the device firmware can be updated over-the-air (OTA)
 
 ## Development support
 
