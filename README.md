@@ -7,8 +7,8 @@
 - [Build instructions](#build-instructions)
   - [Prerequisites](#prerequisites)
   - [Hardware](#hardware-1)
-    - [Alternative off-the-shelf hardware](#alternative-off-the-shelf-hardware)
   - [Mechanical construction](#mechanical-construction)
+  - [Alternative off-the-shelf hardware](#alternative-off-the-shelf-hardware)
   - [Firmware](#firmware)
   - [OpenHAB integration](#openhab-integration)
 - [Web interface](#web-interface)
@@ -22,7 +22,7 @@
   - [Using Espressif speech recognition in an Arduino project](#using-espressif-speech-recognition-in-an-arduino-project)
   - [Acoustics "debugging"](#acoustics-debugging)
   - [How Rhasspy communicates with satellites](#how-rhasspy-communicates-with-satellites)
-- [Alternatives](#alternatives)
+- [Alternative projects](#alternative-projects)
 - [Featuritis](#featuritis)
 - [References](#references)
 - [License](#license)
@@ -91,13 +91,6 @@ Put a piece of insulating tape over the pin in the bottom left corner of the pro
 
 For a speaker, I use half of a pair of "*Amazon Basics Stereo 2.0 Speakers for PC or Laptop*". They are cheap (typically under €20 per pair), and the sound quality is quite good, for this type of application.
 
-#### Alternative off-the-shelf hardware
-As an alternative, the software can be run on an Espressif ESP-BOX-Lite gadget. I had bought two of these in the past, to experiment with Willow, and now I am reusing them with this firmware. Enable `USE_ESP_BOX_LITE` at the start of `prefs.h`. It might also work with some of the other gadgets offered by Espressif, but I haven't tested that. The speaker inside the gadget is quite tinny, and the device is much more expensive (>€50) than the custom hardware, but you get a ready-made unit, no soldering required.
-
-Another off-the-shelf hardware alternative is the Spotpear "Muma", this can be found on Aliexpress for about €25, as "DeepSeek AI Chat Box ESP32-S3 1,54 inch LCD", the manufacturer provides some technical information [here](https://spotpear.com/wiki/ESP32-S3-AI-1.54-inch-LCD-Display-TouchScreen-N16R8-muma-DeepSeek.html). It has one microphone (in an awkward position near the back of the unit), one small speaker (quite tinny) and a small LCD. Enable `USE_ESP_BOX_LITE` at the start of `prefs.h` to use this hardware variant. 
-
-Other hardware setups could be supported by creating new files in the `hardware/` folder, with classes derived from the `EspBoard` and `AudioCodec` class.
-
 ### Mechanical construction
 
 I used a 100x60x25mm plastic box for the project. Here is how I placed the microphones:
@@ -108,13 +101,25 @@ I used a 100x60x25mm plastic box for the project. Here is how I placed the micro
 <img src="pictures/mics-in-box.jpg" alt="mic assembly" width="250" align="right">
 - align the perf-board and microphones assembly over the holes in the plastic box, and glue it to the plactic box
 
+### Alternative off-the-shelf hardware
+As an alternative, the software can be run on an Espressif ESP-BOX-Lite gadget. I had bought two of these in the past, to experiment with Willow, and now I am reusing them with this firmware. Enable `USE_ESP_BOX_LITE` at the start of `prefs.h`. It might also work with some of the other gadgets offered by Espressif, but I haven't tested that. The speaker inside the gadget is quite tinny, and the device is much more expensive (>€50) than the custom hardware, but you get a ready-made unit, no soldering required.
+
+Another off-the-shelf hardware alternative is the Spotpear "Muma", this can be found on Aliexpress for about €25, as "DeepSeek AI Chat Box ESP32-S3 1,54 inch LCD", the manufacturer provides some technical information [here](https://spotpear.com/wiki/ESP32-S3-AI-1.54-inch-LCD-Display-TouchScreen-N16R8-muma-DeepSeek.html). It has one microphone (in an awkward position near the back of the unit), one small speaker (quite tinny) and a small LCD. Enable `USE_MUMA` at the start of `prefs.h` to use this hardware variant. 
+
+<figure>
+<img src="pictures/variants.jpg" alt="hardware variants" />
+<figcaption>Hardware variants, left to right: homebrew, Espressif ESP32-S3-BOX-Lite, Spotpear Muma</figcaption></figure>
+
+Other hardware setups could be supported by creating new files in the `main/hardware/` folder, with classes derived from the `EspBoard` and `AudioCodec` class.
+
 ### Firmware
 
 1. Clone the Github repository.
 2. Copy `main/myauth_sample.h`to `main/myauth.h` and edit the environment-specific items defined there, such as your WiFi SSID and password, as well as the names of your OpenHAB and Rhasspy servers.
 3. In folder `tools/`, edit `oh_sr_commands.py` to set the name of your OpenHAB server, then run `python oh_sr_commands.py`. This creates file `data/oh_sr_commands.csv`, copy that to your HTTP server. This is where the MyVoiceBox firmware will get its information about voice-related OpenHAB items. It also creates file `managed_components/espressif__esp-sr/model/multinet_model/fst/commands_en.txt', which is needed if you select Multinet7 as the speech recognition model
-4. Build firmware and upload to your ESP32-S3 module, over USB.
-5. Future updates can also be done over-the-air. Edit `ota-update.bat` to set the IP address of your device, then run it.
+4. Edit `main/prefs.h` and enable the correct hardware configuration: homebrew or Espressif ESP32-S3-BOX-Mini or Spotpear Muma.
+5. Build firmware and upload to your ESP32-S3 module, over USB.
+6. Future updates can also be done over-the-air. Edit `ota-update.bat` to set the IP address of your device, then run it.
 
 ### OpenHAB integration
 
@@ -203,6 +208,8 @@ I found it really helpful to be able to listen to the audio signal picked up by 
 
 These help to address issues like: is there too much echo from the room? is the signal contaminated with electrical noise?
 
+A simple audio sanity check is run at startup: the device plays a jingle, so I can hear that audio _output_ is free of distortion. While the jingle is playing, the microphone signal is recorded, and played back afterwards. The second audible jingle tells me if audio _input_ is free of distortion.
+
 ### How Rhasspy communicates with satellites
 
 The MyVoiceBox device simulates a Rhasspy satellite to the extent necessary for working with my OpenHAB installation, so I had to do a bit of reseearch on how Rhasspy communicates with its satellites.
@@ -211,7 +218,7 @@ To create audio output on the satellite, Rhasspy publishes an MQTT message to `h
 
 When the satellite has finished playing back the WAV file, it will publish a message to `hermes/audioServer/<siteId>/playFinished`. The payload is a JSON formatted string that contains the sessionId from the previous message. So my satellite would respond to the example message above with a payload of `{"id": "226f9057-1360-4927-a786-8fcf8d6a997b", "sessionId": "226f9057-1360-4927-a786-8fcf8d6a997b"}`.
 
-## Alternatives
+## Alternative projects
 
 I am aware of the following possible alternatives to my project, with similar objectives and features:
 
