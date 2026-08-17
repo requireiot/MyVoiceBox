@@ -1,5 +1,5 @@
 /**
- * @file        LcDisplay_ST7789.cpp
+ * @file        LcDisplay_ST77916.cpp
  * @project     voice control projects
  * @author      Bernd Waldmann (you@domain.com)
  * @date        2026-08-03
@@ -20,10 +20,10 @@
 
 /**
  * @brief Implementation of hardware control specific to 
- * custom device with 320x240 LCD sith ST7789 controller
+ * custom device with round 360x360 LCD with ST77916 controller
  */
 
- #include "esp_err.h"
+#include "esp_err.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h" 
 #include "esp_lcd_st77916.h"

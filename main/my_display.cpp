@@ -1,6 +1,6 @@
 /**
- * @file        display.cpp
- * @project     MyVoiceBoxLite
+ * @file        my_display.cpp
+ * @project     MyVoiceBox
  * @author      Bernd Waldmann (you@domain.com)
  * @date        2025-11-28
  * tabsize  4

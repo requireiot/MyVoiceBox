@@ -1,6 +1,6 @@
 /**
  * @file        my_sensors.cpp
- * @project     MyVoiceBoxLite
+ * @project     MyVoiceBox
  * @author      Bernd Waldmann (you@domain.com)
  * @date        2025-11-28
  * tabsize  4

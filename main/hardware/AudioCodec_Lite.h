@@ -23,7 +23,7 @@
  * ESP32-S3-BOX-Lite device
  */
 
- #pragma once
+#pragma once
 #include "EspBoard.h"
 #include "AudioCodec.h"
 

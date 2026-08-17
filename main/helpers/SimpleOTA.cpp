@@ -1,6 +1,6 @@
 /**
- * @file        SimpleOTA.cpp
- * Project		: Home automation
+ * @file          SimpleOTA.cpp
+ * 
  * Author		: Bernd Waldmann
  * Created		: 9-Feb-2020
  * Tabsize		: 4
