@@ -23,6 +23,9 @@
 #define MQTT_BROKER_OPENHAB "my-openhab-machine.home"
 
 // local NTP server, so this gadget does not need internet access
-#define NTP_SERVER "fritz.box"
+//#define NTP_SERVER "fritz.box"
+
+// remote syslog server, if available
+//#define LOG_SERVER "my-log-server.home"
 
 #endif // __MYAUTH_H

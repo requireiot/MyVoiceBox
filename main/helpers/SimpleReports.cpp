@@ -23,6 +23,7 @@
  * to serial port or provide as JSON-formatted string, for publishing via MQTT or syslog
  */
 
+#include <map>
 #include <Arduino.h>
 #include <WiFi.h>           // LGPLv2.1+ license
 #include <ArduinoJson.h>    // MIT license, https://github.com/bblanchon/ArduinoJson
@@ -35,7 +36,7 @@
 
 static char msgbuf[256];  // buffer for JSON string
 
-
+/*
 static const char* reset_reasons_32[] = {
 "0: none",
 "1: Vbat power on reset",
@@ -64,15 +65,49 @@ static const char* reset_reasons_32[] = {
 };
 
 #define NREASONS sizeof(reset_reasons_32)/sizeof(reset_reasons_32[0])
+*/
+
+const std::map<esp_reset_reason_t,const char*> ESP32_RESET_REASON_STRINGS = {
+    { ESP_RST_UNKNOWN, "unknown" },
+    { ESP_RST_POWERON, "power-on" },
+    { ESP_RST_EXT, "external pin" },
+    { ESP_RST_SW, "Software reset via esp_restart" },
+    { ESP_RST_PANIC, "Software reset due to exception/panic" },
+    { ESP_RST_INT_WDT, "interrupt watchdog" },
+    { ESP_RST_TASK_WDT, "task watchdog" },
+    { ESP_RST_WDT, "other watchdogs" },
+    { ESP_RST_DEEPSLEEP, "exiting deep sleep" },
+    { ESP_RST_BROWNOUT, "Brownout" },
+    { ESP_RST_SDIO, "SDIO" },
+    { ESP_RST_USB, "USB peripheral" },
+    { ESP_RST_JTAG, "JTAG" },
+    { ESP_RST_EFUSE, "efuse error" },
+    { ESP_RST_PWR_GLITCH, "power glitch detected" },
+    { ESP_RST_CPU_LOCKUP, "CPU lock up (double exception)" },
+};
+
+
+const char* getResetReasonString()
+{
+    esp_reset_reason_t rr = esp_reset_reason();
+    auto item = ESP32_RESET_REASON_STRINGS.find(rr);
+    if (item != ESP32_RESET_REASON_STRINGS.end())
+        return item->second;
+    else
+        return NULL;
+}
 
 
 void printResetReason( Print& serial )
 {
+    serial.printf("%s\n", getResetReasonString());
+    /*
   	int reset_reason = rtc_get_reset_reason(0); 
     if (reset_reason < NREASONS)
         serial.printf(" Reset reason %s\n",reset_reasons_32[reset_reason]);
     else
         serial.printf(" Reset reason %d (unknown)\n", reset_reason );
+    */
 }
 
 

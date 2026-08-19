@@ -118,6 +118,9 @@ bool init_Sensors_I2C()
 #ifdef USE_BME280
 
 
+#define BME280_ADDRESS 0x76     // or 0x77
+
+
 static bme280_handle_t bme_handle=0;
 
 

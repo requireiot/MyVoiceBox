@@ -1,5 +1,6 @@
 #pragma once
 
+const char* getResetReasonString();
 void printResetReason( Print& serial );
 void printEnvironment( Print& serial );
 void printMemoryInfo( Print& serial, const char* description=NULL );
